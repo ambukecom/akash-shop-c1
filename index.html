@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0a1a33">
+  <title>AKASH SHOP C1 · Inventory</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f59e0b'/%3E%3Ctext x='32' y='42' font-family='Arial' font-weight='700' font-size='28' text-anchor='middle' fill='%230a1a33'%3EC1%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="boot" class="boot"><div class="spinner" aria-label="Loading"></div></div>
+
+  <!-- ============ SIGN-IN ============ -->
+  <section id="auth-view" class="auth" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="mark">C1</span>
+        <div>
+          <h1>AKASH SHOP C1</h1>
+          <p>Inventory Tracker</p>
+        </div>
+      </div>
+
+      <form id="login-form" class="stack">
+        <label class="field"><span>Email</span>
+          <input type="email" name="email" autocomplete="username" required>
+        </label>
+        <label class="field"><span>Password</span>
+          <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+        <button class="link" type="button" id="forgot-btn">Forgot password?</button>
+      </form>
+
+      <form id="reset-form" class="stack" hidden>
+        <p class="auth-help">Enter your email and we'll send a link to set a new password.</p>
+        <label class="field"><span>Email</span>
+          <input type="email" name="email" autocomplete="username" required>
+        </label>
+        <button class="btn btn-primary btn-block" type="submit">Send reset link</button>
+        <button class="link" type="button" data-back>Back to sign in</button>
+      </form>
+
+      <form id="newpw-form" class="stack" hidden>
+        <p class="auth-help">Choose a new password (at least 8 characters).</p>
+        <label class="field"><span>New password</span>
+          <input type="password" name="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <label class="field"><span>Confirm password</span>
+          <input type="password" name="confirm" autocomplete="new-password" minlength="8" required>
+        </label>
+        <button class="btn btn-primary btn-block" type="submit">Save new password</button>
+      </form>
+
+      <p id="auth-msg" class="auth-msg" role="status" hidden></p>
+    </div>
+    <p class="auth-foot">Private system · Authorised staff only</p>
+  </section>
+
+  <!-- ============ APP ============ -->
+  <div id="app-view" class="app" hidden>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brandmark" href="#/dashboard">
+          <span class="mark">C1</span>
+          <span class="brandmark-text"><strong>AKASH SHOP C1</strong><small>Inventory Tracker</small></span>
+        </a>
+        <div class="top-actions">
+          <button class="btn btn-glass" id="refresh-btn" title="Refresh data"><span data-icon="refresh"></span><span class="hide-sm">Refresh</span></button>
+          <button class="btn btn-glass" data-act="export" title="Download inventory as CSV"><span data-icon="download"></span><span class="hide-sm">Export</span></button>
+          <button class="btn btn-accent" data-act="add-item"><span data-icon="plus"></span><span>Add item</span></button>
+          <span class="divider hide-sm"></span>
+          <span id="user-email" class="user-email hide-md"></span>
+          <button class="btn btn-glass" id="signout-btn" title="Sign out"><span data-icon="logout"></span><span class="hide-sm">Sign out</span></button>
+        </div>
+      </div>
+    </header>
+    <nav class="tabs" id="tabs" aria-label="Inventory sections"></nav>
+    <main id="main" class="main"></main>
+  </div>
+
+  <dialog id="modal" class="modal"></dialog>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
