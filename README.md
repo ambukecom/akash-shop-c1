@@ -28,6 +28,20 @@ A password-protected inventory website for the shop. It runs as a static site fr
 - **Works on phones**, and follows the device's dark mode.
 - **Automatic sign-out** after 30 minutes idle, and when the browser tab is closed. Both can be changed in `js/config.js`.
 
+### Sales (Live Sales Counter)
+
+- **Live Sales Counter** button on the dashboard opens a full-screen till:
+  - top half: the **Sales Sheet** (quantities and prices can be changed on each line)
+  - bottom half: every item in the shop as tap-able tiles (search + brand filters), a big **quantity circle** with − / + (or type a number), and a big **Add** button
+  - a voice reads out the **item name and quantity** after each Add (never the price); the speaker button mutes it
+  - the running **total** is always shown at the bottom
+- **Submit** → a confirmation pop-up → **customer details** (Private, Frequent customer drop-down, or New customer with "Save as frequent customer"; address and number optional) → **payment** (Amount due, Paid in full or Partial payment, Cash / Card / Bank transfer) → **Generate Invoice & Record Sale**.
+- Recording a sale **takes the items off shop stock immediately** (it can't sell more than the shop holds) and logs each line in the stock history as "Sale C1-01001".
+- A **PDF invoice** downloads straight away, ending with "Thanks For Shopping With Us". On phones a **Send to customer** button opens the share menu (WhatsApp, email…).
+- **Invoices tab** – every invoice with sales metrics and charts; download any invoice again at any time.
+- **Not Fully Paid tab** – everything still owed: total outstanding, who owes the most, oldest balance, tap-to-call numbers, and **Record payment** for money paid later. Once fully paid, the invoice leaves this tab, and its PDF shows the payment history.
+- **Invoice details** (Invoices tab) sets the shop address, phone, email and bottom message printed on invoices. **Frequent customers** lets you add or remove saved customers.
+
 ## Files
 
 ```
@@ -35,7 +49,9 @@ index.html            the page
 css/styles.css        the look
 js/config.js          ← your settings (Supabase keys, currency)
 js/app.js             the app
+js/pdf.js             builds the PDF invoices
 supabase/schema.sql   database setup, run once in Supabase
+supabase/sales.sql    sales/invoices setup, run once in Supabase
 ```
 
 ## Setup (about 20 minutes)
@@ -46,6 +62,8 @@ Supabase occasionally renames menu items. If a label below doesn't match exactly
 
 1. Sign up at **supabase.com** → **New project**. Pick a region near the shop and save the database password somewhere safe.
 2. Open **SQL Editor** → **New query**. Paste in the whole of `supabase/schema.sql` and click **Run**. It should finish with "Success".
+
+   Then open another **New query**, paste in the whole of `supabase/sales.sql` and click **Run**.
 
 ### 2. Lock down sign-ups and create the shopkeeper's login
 

@@ -3,6 +3,7 @@
 // =====================================================================
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { CONFIG } from './config.js';
+import { buildInvoicePdf, winAnsiSafe } from './pdf.js';
 
 /* ---------------------------------------------------------------------
    Helpers
@@ -34,6 +35,25 @@ const ICONS = {
   check: '<path d="M5 12l5 5 9-10"/>',
   activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
   shelf: '<path d="M4 4v16M20 4v16M4 10h16M4 16h16"/>',
+  cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a1.5 1.5 0 0 0 1.5 1.1h8.6a1.5 1.5 0 0 0 1.5-1.1L21 7H6.2"/>',
+  receipt: '<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2V3z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  wallet: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2z"/><circle cx="16" cy="14.5" r="1.3"/>',
+  volume: '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/>',
+  mute: '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.3c2.2.7 3.5 2.8 3.5 5.7"/>',
+  userPlus: '<circle cx="10" cy="8" r="4"/><path d="M3 21c0-4 3.1-7 7-7 1.4 0 2.7.4 3.8 1M19 14v6M16 17h6"/>',
+  phone: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
+  minus: '<path d="M5 12h14"/>',
+  right: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  left: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
+  eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  file: '<path d="M14 3H6v18h12V7l-4-4z"/><path d="M14 3v4h4M9 13h6M9 17h6"/>',
+  card: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M6 15h4"/>',
+  cash: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/>',
+  bank: '<path d="M3 10l9-6 9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
 };
 const icon = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
@@ -95,6 +115,12 @@ const state = {
   loadedAt: 0,
   filters: freshFilters(),
   pendingMsg: null,
+  sales: [],
+  customers: [],
+  shop: {},
+  salesError: null,
+  salesFilters: { q: '', status: 'all' },
+  pos: null,
 };
 const brandOf = (id) => state.brands.find((b) => b.id === id);
 const itemsFor = (bid) => (bid === 'none' ? state.items.filter((i) => !i.brand_id) : state.items.filter((i) => i.brand_id === bid));
@@ -215,7 +241,9 @@ async function enterApp(session) {
   state.user = session.user;
   const { data, error } = await sb.from('staff').select('user_id').eq('user_id', session.user.id).maybeSingle();
   if (error || !data) {
-    state.pendingMsg = ['This account is not authorised for AKASH SHOP C1. Ask the owner to add it as staff.', 'error'];
+    state.pendingMsg = [error
+      ? `Signed in, but the database refused the access check: ${error.message}`
+      : 'This account is not authorised for AKASH SHOP C1. Ask the owner to add it as staff.', 'error'];
     state.user = null;
     await sb.auth.signOut();
     return;
@@ -232,7 +260,9 @@ async function enterApp(session) {
 function teardown() {
   state.user = null;
   state.brands = []; state.items = []; state.movements = [];
+  state.sales = []; state.customers = []; state.shop = {};
   state.lastRoute = '';
+  closePOS(true);
   destroyCharts();
   $('#main').innerHTML = '';
   $('#tabs').innerHTML = '';
@@ -261,16 +291,25 @@ function startIdleWatch() {
 --------------------------------------------------------------------- */
 async function loadAll() {
   const since = new Date(Date.now() - 30 * 864e5).toISOString();
-  const [b, i, m] = await Promise.all([
+  const [b, i, m, s, c, st] = await Promise.all([
     sb.from('brands').select('*').order('name'),
     sb.from('items').select('*').order('name'),
     sb.from('stock_movements').select('*').gte('created_at', since).order('created_at', { ascending: false }).limit(1000),
+    sb.from('sales').select('*, sale_items(*), sale_payments(*)').order('created_at', { ascending: false }).limit(2000),
+    sb.from('customers').select('*').order('name'),
+    sb.from('shop_settings').select('*').eq('id', 1).maybeSingle(),
   ]);
   const err = b.error || i.error || m.error;
   if (err) { toast(niceError(err), 'error'); return false; }
   state.brands = b.data || [];
   state.items = (i.data || []).map((x) => ({ ...x, unit_price: Number(x.unit_price) }));
   state.movements = m.data || [];
+  // Sales features need supabase/sales.sql; the rest of the app works without it.
+  const salesErr = s.error || c.error || st.error;
+  state.salesError = salesErr ? (salesErr.message || String(salesErr)) : null;
+  state.sales = s.error ? [] : (s.data || []).map(normalizeSale);
+  state.customers = c.error ? [] : (c.data || []);
+  state.shop = st.data || { shop_name: 'AKASH SHOP C1', footer_note: 'Thanks For Shopping With Us' };
   state.loadedAt = Date.now();
   return true;
 }
@@ -293,7 +332,7 @@ function bindAppChrome() {
 
   window.addEventListener('hashchange', () => { if (state.user) render(); });
   window.addEventListener('focus', async () => {
-    if (state.user && Date.now() - state.loadedAt > 60000 && !$('#modal').open) await refresh();
+    if (state.user && Date.now() - state.loadedAt > 60000 && !$('#modal').open && !state.pos) await refresh();
   });
 
   document.addEventListener('click', (e) => {
@@ -301,7 +340,20 @@ function bindAppChrome() {
     if (!el || !state.user) return;
     const { act, id } = el.dataset;
     const item = id ? state.items.find((i) => i.id === id) : null;
+    const sale = id ? saleById(id) : null;
     switch (act) {
+      case 'pos-open': openPOS(); break;
+      case 'inv-pdf': if (sale) downloadInvoice(sale); break;
+      case 'inv-share': if (sale) shareInvoice(sale); break;
+      case 'inv-view': if (sale) saleModal(sale); break;
+      case 'pay': if (sale) paymentModal(sale); break;
+      case 'shop-settings': shopModal(); break;
+      case 'customers': customersModal(); break;
+      case 'sales-status':
+        state.salesFilters.status = el.dataset.status;
+        { const s = $('#s-status'); if (s) s.value = el.dataset.status; }
+        renderSalesTable();
+        break;
       case 'new-brand': brandModal(); break;
       case 'edit-brand': brandModal(brandOf(id)); break;
       case 'delete-brand': deleteBrand(brandOf(id)); break;
@@ -321,6 +373,8 @@ function bindAppChrome() {
 }
 
 function currentRoute() {
+  if (location.hash === '#/invoices') return { view: 'invoices' };
+  if (location.hash === '#/unpaid') return { view: 'unpaid' };
   const m = location.hash.match(/^#\/brand\/(.+)$/);
   return m ? { view: 'brand', id: decodeURIComponent(m[1]) } : { view: 'dashboard' };
 }
@@ -330,10 +384,18 @@ function render() {
   const r = currentRoute();
   if (r.view === 'brand' && r.id !== 'none' && !brandOf(r.id)) { go('#/dashboard'); return; }
   const key = r.view + (r.id || '');
-  if (key !== state.lastRoute) { state.filters = freshFilters(); state.lastRoute = key; window.scrollTo(0, 0); }
+  if (key !== state.lastRoute) {
+    state.filters = freshFilters();
+    state.salesFilters = { q: '', status: 'all' };
+    state.lastRoute = key;
+    window.scrollTo(0, 0);
+  }
   destroyCharts();
   renderTabs();
-  if (r.view === 'brand') renderBrand(r.id); else renderDashboard();
+  if (r.view === 'brand') renderBrand(r.id);
+  else if (r.view === 'invoices') renderInvoices();
+  else if (r.view === 'unpaid') renderUnpaid();
+  else renderDashboard();
 }
 
 function renderTabs() {
@@ -341,6 +403,9 @@ function renderTabs() {
   const tab = (href, label, active, lead, badge = 0) =>
     `<a href="${href}" class="tab${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>${lead}<span>${esc(label)}</span>${badge ? `<span class="tab-badge" title="${badge} need attention">${badge}</span>` : ''}</a>`;
   let html = tab('#/dashboard', 'Dashboard', r.view === 'dashboard', icon('grid'));
+  html += tab('#/invoices', 'Invoices', r.view === 'invoices', icon('receipt'));
+  html += tab('#/unpaid', 'Not Fully Paid', r.view === 'unpaid', icon('wallet'), unpaidSales().length);
+  html += '<span class="tab-sep" aria-hidden="true"></span>';
   for (const b of state.brands) {
     const s = summarize(itemsFor(b.id));
     html += tab(`#/brand/${encodeURIComponent(b.id)}`, b.name, r.view === 'brand' && r.id === b.id, `<span class="dot" style="--c:${safeColor(b.color)}"></span>`, s.low + s.out);
@@ -393,7 +458,7 @@ function activityList(movements) {
   if (!movements.length) return `<div class="empty-mini">${icon('activity')}<span>No stock changes in the last 30 days</span></div>`;
   return `<ul class="feed">${movements.slice(0, 8).map((m) => {
     const isMove = (m.reason || '').startsWith('Transfer');
-    const cls = isMove ? 'move' : m.change > 0 ? 'in' : 'out';
+    const cls = isMove ? 'move' : (m.reason || '').startsWith('Sale') ? 'sale' : m.change > 0 ? 'in' : 'out';
     return `<li><span class="feed-chip ${cls}">${m.change > 0 ? '+' : '−'}${fmtNum(Math.abs(m.change))}</span>
       <div><strong>${esc(m.item_name)}</strong><small>${m.location === 'shop' ? 'Shop' : 'Warehouse'} · ${esc(m.reason || '')}</small></div>
       <time datetime="${esc(m.created_at)}">${timeAgo(m.created_at)}</time></li>`;
@@ -437,7 +502,7 @@ function renderDashboard() {
   const lowItems = state.items.filter((i) => statusOf(i) === 'low').sort((a, b) => total(a) - total(b));
   const outItems = state.items.filter((i) => statusOf(i) === 'out');
 
-  $('#main').innerHTML = head + alertBanner(s) + `
+  $('#main').innerHTML = head + salesStrip() + alertBanner(s) + `
     <section class="kpis">
       ${kpi('Products', fmtNum(s.count), 'box', '', `${state.brands.length} brand tab${state.brands.length === 1 ? '' : 's'}`)}
       ${kpi('Units in shop', fmtNum(s.shop), 'store', '', `${pct(s.shop)}% of all stock`)}
@@ -1097,6 +1162,1014 @@ function exportCSV() {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast(`Exported ${rows.length} items`);
+}
+
+/* =====================================================================
+   SALES — helpers
+===================================================================== */
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const fmtMoney2 = (n) => new Intl.NumberFormat(CONFIG.LOCALE, { style: 'currency', currency: CONFIG.CURRENCY, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
+const pdfMoney = (n) => {
+  const s = fmtMoney2(n);
+  return winAnsiSafe(s) ? s : `${CONFIG.CURRENCY} ${new Intl.NumberFormat(CONFIG.LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0)}`;
+};
+const fmtDate = (iso) => new Date(iso).toLocaleDateString(CONFIG.LOCALE, { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtDateTime = (iso) => new Date(iso).toLocaleString(CONFIG.LOCALE, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const fmtTime = (iso) => new Date(iso).toLocaleTimeString(CONFIG.LOCALE, { hour: '2-digit', minute: '2-digit' });
+const owed = (s) => Math.max(0, round2(s.total - s.amount_paid));
+const saleStatus = (s) => (owed(s) <= 0 ? 'paid' : s.amount_paid > 0 ? 'partial' : 'unpaid');
+const SALE_STATUS = { paid: ['Paid', 'ok'], partial: ['Part paid', 'warn'], unpaid: ['Unpaid', 'bad'] };
+const daysSince = (iso) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 864e5));
+const dayStart = (d = new Date()) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const saleById = (id) => state.sales.find((s) => s.id === id);
+const unpaidSales = () => state.sales.filter((s) => owed(s) > 0);
+const unitsOf = (s) => s.items.reduce((a, l) => a + l.qty, 0);
+const ageLabel = (d) => (d === 0 ? 'Today' : d === 1 ? '1 day' : `${d} days`);
+// Who owes: saved customer, else same name, else each anonymous private sale on its own.
+const owerKey = (s) => s.customer_id || (s.is_private ? (s.customer_phone ? 'p:' + s.customer_phone.replace(/\D/g, '') : 'inv:' + s.id) : 'n:' + s.customer_name.trim().toLowerCase());
+const owerName = (s) => (s.is_private && !s.customer_phone ? `Private · ${s.invoice_no}` : s.customer_name);
+const PAY_METHODS = [['Cash', 'cash'], ['Card', 'card'], ['Bank transfer', 'bank']];
+
+function normalizeSale(s) {
+  return {
+    ...s,
+    total: Number(s.total),
+    amount_paid: Number(s.amount_paid),
+    items: (s.sale_items || []).map((l) => ({ ...l, qty: Number(l.qty), unit_price: Number(l.unit_price), line_total: Number(l.line_total) }))
+      .sort((a, b) => a.id - b.id),
+    payments: (s.sale_payments || []).map((p) => ({ ...p, amount: Number(p.amount) }))
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))),
+  };
+}
+
+function salesStats() {
+  const today = dayStart().getTime();
+  const week = today - 6 * 864e5;
+  const m = new Date(); const month = new Date(m.getFullYear(), m.getMonth(), 1).getTime();
+  const r = { today: 0, todayN: 0, week: 0, month: 0, monthN: 0, all: 0, collected: 0, owed: 0, owedN: 0, owing: new Set() };
+  for (const s of state.sales) {
+    const t = new Date(s.created_at).getTime();
+    r.all += s.total; r.collected += s.amount_paid;
+    if (t >= today) { r.today += s.total; r.todayN++; }
+    if (t >= week) r.week += s.total;
+    if (t >= month) { r.month += s.total; r.monthN++; }
+    const o = owed(s);
+    if (o > 0) { r.owed += o; r.owedN++; r.owing.add(owerKey(s)); }
+  }
+  r.owingN = r.owing.size;
+  return r;
+}
+
+function salesSetupNotice() {
+  return `<section class="card setup-card">${icon('alert')}<div>
+    <h3>One more step to switch on sales</h3>
+    <p>Run <code>supabase/sales.sql</code> in Supabase → SQL Editor (New query → paste → Run), then click Refresh.</p>
+    <small class="muted">Database said: ${esc(state.salesError)}</small></div></section>`;
+}
+
+function salesStrip() {
+  if (state.salesError) {
+    return `<section class="sales-strip"><button class="pos-launch" data-act="pos-open">
+      <span class="pos-launch-ico">${icon('cart')}</span>
+      <span><strong>Live Sales Counter</strong><small>Needs one setup step: see the Invoices tab</small></span>${icon('right')}</button></section>`;
+  }
+  const st = salesStats();
+  return `<section class="sales-strip">
+    <button class="pos-launch" data-act="pos-open">
+      <span class="pos-launch-ico">${icon('cart')}</span>
+      <span><strong>Live Sales Counter</strong><small>Start a new sale</small></span>${icon('right')}
+    </button>
+    <a class="strip-stat" href="#/invoices"><small>Today's sales</small><strong>${fmtMoney2(st.today)}</strong><span>${st.todayN} invoice${st.todayN === 1 ? '' : 's'}</span></a>
+    <a class="strip-stat" href="#/invoices"><small>This month</small><strong>${fmtMoney2(st.month)}</strong><span>${st.monthN} invoice${st.monthN === 1 ? '' : 's'}</span></a>
+    <a class="strip-stat ${st.owed > 0 ? 'bad' : ''}" href="#/unpaid"><small>Owed to you</small><strong>${fmtMoney2(st.owed)}</strong><span>${st.owingN} customer${st.owingN === 1 ? '' : 's'} · ${st.owedN} invoice${st.owedN === 1 ? '' : 's'}</span></a>
+  </section>`;
+}
+
+/* =====================================================================
+   INVOICE PDF — download / share
+===================================================================== */
+function invoiceBlob(sale) {
+  const bytes = buildInvoicePdf({
+    shop: state.shop, sale, lines: sale.items, payments: sale.payments,
+    money: pdfMoney, date: fmtDate, dateTime: fmtDateTime,
+  });
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+const invoiceFileName = (s) => `Invoice-${s.invoice_no}-${(s.customer_name || 'customer').replace(/[^\w-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}.pdf`;
+
+function downloadInvoice(sale) {
+  try {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(invoiceBlob(sale));
+    a.download = invoiceFileName(sale);
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast(`Invoice ${sale.invoice_no} downloaded`);
+  } catch (e) {
+    toast('Could not create the PDF: ' + (e.message || e), 'error');
+  }
+}
+function canShareFiles() {
+  try { return !!navigator.canShare && navigator.canShare({ files: [new File(['x'], 'x.pdf', { type: 'application/pdf' })] }); } catch { return false; }
+}
+async function shareInvoice(sale) {
+  const file = new File([invoiceBlob(sale)], invoiceFileName(sale), { type: 'application/pdf' });
+  try {
+    await navigator.share({ files: [file], title: `Invoice ${sale.invoice_no}`, text: `Invoice ${sale.invoice_no} from ${state.shop.shop_name || 'AKASH SHOP C1'}` });
+  } catch (e) {
+    if (e?.name !== 'AbortError') downloadInvoice(sale);
+  }
+}
+
+/* =====================================================================
+   LIVE SALES COUNTER
+===================================================================== */
+const MUTE_KEY = 'c1-pos-muted';
+const isMuted = () => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } };
+const setMuted = (v) => { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } catch { /* private mode */ } };
+
+function speak(text) {
+  if (isMuted() || !('speechSynthesis' in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = CONFIG.LOCALE || 'en-GB';
+    u.rate = 1.05;
+    const v = speechSynthesis.getVoices().find((x) => x.lang === u.lang) || speechSynthesis.getVoices().find((x) => x.lang?.startsWith('en'));
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch { /* speech not available */ }
+}
+
+const freshPOS = () => ({
+  step: 'items', lines: [], selected: null, qty: 1, q: '', brand: 'all', flash: null,
+  customer: { mode: 'private', id: '', name: '', address: '', phone: '', save: true },
+  pay: { full: true, amount: '', method: 'Cash' },
+  sale: null, busy: false,
+});
+
+const posTotal = () => round2(state.pos.lines.reduce((a, l) => a + round2(l.qty * l.unit_price), 0));
+const posUnits = () => state.pos.lines.reduce((a, l) => a + l.qty, 0);
+const inCart = (id) => state.pos.lines.find((l) => l.item_id === id)?.qty || 0;
+const sellable = (i) => !i.flagged_out_of_stock && i.shop_qty > 0;
+const availFor = (i) => (sellable(i) ? i.shop_qty - inCart(i.id) : 0);
+const posItem = (id) => state.items.find((i) => i.id === id);
+
+function openPOS() {
+  if (state.salesError) { toast('Run supabase/sales.sql in Supabase first, then click Refresh.', 'error'); return; }
+  if (!state.items.some(sellable)) { toast('No items have stock in the shop to sell yet.', 'error'); return; }
+  state.pos = freshPOS();
+  let el = $('#pos');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'pos'; el.className = 'pos';
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true'); el.setAttribute('aria-label', 'Live Sales Counter');
+    document.body.append(el);
+    el.addEventListener('click', posClick);
+    el.addEventListener('input', posInput);
+    el.addEventListener('change', posInput);
+    el.addEventListener('keydown', posKey);
+  }
+  el.hidden = false;
+  document.body.classList.add('pos-open');
+  renderPOS();
+  // warm up the voice list (some browsers load voices lazily)
+  try { speechSynthesis?.getVoices(); } catch { /* ignore */ }
+}
+
+function closePOS(force = false) {
+  const el = $('#pos');
+  if (!state.pos || !el) { state.pos = null; return; }
+  const dirty = state.pos.step !== 'done' && state.pos.lines.length;
+  const done = () => {
+    state.pos = null;
+    el.hidden = true; el.innerHTML = '';
+    document.body.classList.remove('pos-open');
+    try { speechSynthesis?.cancel(); } catch { /* ignore */ }
+    if (state.user && !force) render();
+  };
+  if (dirty && !force) {
+    confirmModal({
+      title: 'Discard this sale?', confirmLabel: 'Discard sale',
+      message: `The sales sheet has <strong>${state.pos.lines.length} item${state.pos.lines.length === 1 ? '' : 's'}</strong>. Nothing has been recorded or taken from stock yet.`,
+      onConfirm: async () => { done(); },
+    });
+  } else done();
+}
+
+function renderPOS() {
+  const p = state.pos, el = $('#pos');
+  if (!p || !el) return;
+  const steps = [['items', 'Items'], ['customer', 'Customer'], ['payment', 'Payment']];
+  const idx = p.step === 'done' ? 3 : steps.findIndex((s) => s[0] === p.step);
+  el.innerHTML = `<div class="pos-shell step-${p.step}">
+    <header class="pos-head">
+      <div class="pos-title"><span class="mark">C1</span><div><strong>Live Sales Counter</strong><small>${esc(state.shop.shop_name || 'AKASH SHOP C1')}</small></div></div>
+      <ol class="pos-steps">${steps.map(([, l], i) => `<li class="${i < idx ? 'done' : i === idx ? 'on' : ''}"><span>${i < idx ? icon('check') : i + 1}</span>${l}</li>`).join('')}</ol>
+      <div class="pos-head-act">
+        <button class="pos-icon" data-pos="mute" title="${isMuted() ? 'Turn voice on' : 'Mute voice'}" aria-pressed="${isMuted()}">${icon(isMuted() ? 'mute' : 'volume')}<span class="hide-sm">${isMuted() ? 'Muted' : 'Voice on'}</span></button>
+        <button class="pos-icon" data-pos="close" title="Close counter" aria-label="Close">${icon('x')}</button>
+      </div>
+    </header>
+    <div class="pos-body" id="pos-body"></div>
+  </div>`;
+  if (p.step === 'items') renderItemsStep();
+  else if (p.step === 'customer') renderCustomerStep();
+  else if (p.step === 'payment') renderPaymentStep();
+  else renderDoneStep();
+}
+
+/* ---------- step 1: items ---------- */
+function renderItemsStep() {
+  const p = state.pos;
+  const brands = state.brands.filter((b) => itemsFor(b.id).some(sellable));
+  $('#pos-body').innerHTML = `
+    <main class="pos-main">
+      <section class="pos-sheet" aria-label="Sales sheet">
+        <div class="sheet-head">
+          <div><h2>Sales Sheet</h2><span class="muted" id="sheet-count"></span></div>
+          <button class="btn btn-sm btn-ghost" data-pos="clear" id="sheet-clear">${icon('trash')}Clear</button>
+        </div>
+        <div class="sheet-cols" aria-hidden="true"><span>Item</span><span>Qty</span><span>Price</span><span>Amount</span><span></span></div>
+        <div class="sheet-body" id="sheet-body"></div>
+      </section>
+      <section class="pos-pad">
+        <div class="pad-picker">
+          <div class="picker-bar">
+            <label class="search">${icon('search')}<input id="pos-q" type="search" placeholder="Search items" value="${esc(p.q)}" autocomplete="off" aria-label="Search items"></label>
+            <div class="chips" role="tablist">
+              <button class="chip ${p.brand === 'all' ? 'on' : ''}" data-pos="brand" data-id="all">All</button>
+              ${brands.map((b) => `<button class="chip ${p.brand === b.id ? 'on' : ''}" data-pos="brand" data-id="${b.id}"><span class="dot" style="--c:${safeColor(b.color)}"></span>${esc(b.name)}</button>`).join('')}
+              ${itemsFor('none').some(sellable) ? `<button class="chip ${p.brand === 'none' ? 'on' : ''}" data-pos="brand" data-id="none"><span class="dot" style="--c:${UNBRANDED.color}"></span>Unbranded</button>` : ''}
+            </div>
+          </div>
+          <div class="picker-grid" id="pos-grid"></div>
+        </div>
+        <div class="pad-qty">
+          <div class="qty-item" id="qty-item"></div>
+          <div class="qty-ring">
+            <button class="qty-btn minus" data-pos="dec" aria-label="Decrease quantity">${icon('minus')}</button>
+            <div class="qty-circle"><input id="pos-qty" type="number" inputmode="numeric" min="1" step="1" value="${p.qty}" aria-label="Quantity"><small>QTY</small></div>
+            <button class="qty-btn plus" data-pos="inc" aria-label="Increase quantity">${icon('plus')}</button>
+          </div>
+          <div class="qty-hint" id="qty-hint"></div>
+        </div>
+        <button class="pad-add" data-pos="add" id="pos-add">${icon('plus')}<span>Add</span></button>
+      </section>
+    </main>
+    <footer class="pos-foot">
+      <div class="foot-sum"><span id="foot-meta"></span><strong id="pos-total"></strong></div>
+      <button class="btn btn-accent btn-lg" data-pos="submit" id="pos-submit">Submit order ${icon('right')}</button>
+    </footer>`;
+  renderSheet(); renderGrid(); renderQty();
+}
+
+function renderSheet() {
+  const p = state.pos, body = $('#sheet-body');
+  if (!body) return;
+  if (!p.lines.length) {
+    body.innerHTML = `<div class="sheet-empty">${icon('cart')}<strong>No items yet</strong><span>Pick an item below, choose the quantity and tap <b>Add</b>.</span></div>`;
+  } else {
+    body.innerHTML = p.lines.map((l, i) => {
+      const it = posItem(l.item_id);
+      const max = it ? it.shop_qty : l.qty;
+      return `<div class="sheet-row${p.flash === l.item_id ? ' flash' : ''}" data-id="${l.item_id}">
+        <div class="sr-name"><span class="sr-n">${i + 1}</span><div><strong>${esc(l.name)}</strong>${l.sku ? `<small>${esc(l.sku)}</small>` : ''}</div></div>
+        <div class="sr-qty">
+          <button class="mini" data-pos="line-dec" data-id="${l.item_id}" aria-label="One less">${icon('minus')}</button>
+          <input type="number" min="1" max="${max}" step="1" inputmode="numeric" value="${l.qty}" data-line="qty" data-id="${l.item_id}" aria-label="Quantity of ${esc(l.name)}">
+          <button class="mini" data-pos="line-inc" data-id="${l.item_id}" aria-label="One more" ${l.qty >= max ? 'disabled' : ''}>${icon('plus')}</button>
+        </div>
+        <label class="sr-price"><span>${esc(currencySymbol())}</span><input type="number" min="0" step="0.01" inputmode="decimal" value="${l.unit_price.toFixed(2)}" data-line="price" data-id="${l.item_id}" aria-label="Price of ${esc(l.name)}"></label>
+        <strong class="sr-amt" data-amt="${l.item_id}">${fmtMoney2(l.qty * l.unit_price)}</strong>
+        <button class="icon-btn" data-pos="remove" data-id="${l.item_id}" title="Remove" aria-label="Remove ${esc(l.name)}">${icon('x')}</button>
+      </div>`;
+    }).join('');
+    if (p.flash) body.querySelector('.flash')?.scrollIntoView({ block: 'nearest' });
+    p.flash = null;
+  }
+  updateTotals();
+}
+
+function updateTotals() {
+  const p = state.pos;
+  const n = p.lines.length, u = posUnits();
+  $('#sheet-count') && ($('#sheet-count').textContent = n ? `${n} item${n === 1 ? '' : 's'} · ${u} unit${u === 1 ? '' : 's'}` : '');
+  $('#sheet-clear') && ($('#sheet-clear').hidden = !n);
+  $('#foot-meta') && ($('#foot-meta').textContent = n ? `Total · ${u} unit${u === 1 ? '' : 's'}` : 'Total');
+  $('#pos-total') && ($('#pos-total').textContent = fmtMoney2(posTotal()));
+  $('#pos-submit') && ($('#pos-submit').disabled = !n);
+}
+
+function renderGrid() {
+  const p = state.pos, grid = $('#pos-grid');
+  if (!grid) return;
+  const q = p.q.trim().toLowerCase();
+  let list = state.items.slice();
+  if (p.brand !== 'all') list = list.filter((i) => (p.brand === 'none' ? !i.brand_id : i.brand_id === p.brand));
+  if (q) list = list.filter((i) => [i.name, i.sku, i.category, brandOf(i.brand_id)?.name].some((v) => v && v.toLowerCase().includes(q)));
+  list.sort((a, b) => (sellable(b) - sellable(a)) || a.name.localeCompare(b.name));
+  const ids = list.map((i) => i.id).join(',');
+  if (!list.length) { grid.dataset.ids = ''; grid.innerHTML = `<div class="grid-empty">${icon('search')}No items match “${esc(p.q)}”</div>`; return; }
+  const look = (i) => {
+    const av = availFor(i), off = av <= 0;
+    return {
+      off, on: p.selected === i.id, low: !off && av <= 3,
+      cls: `tile${p.selected === i.id ? ' on' : ''}${off ? ' off' : ''}`,
+      note: i.flagged_out_of_stock ? 'Flagged out' : !i.shop_qty ? 'None in shop' : off ? 'All in sheet' : `${av} in shop`,
+    };
+  };
+  // Same tiles as before: update them in place so a tap that is in progress is never lost.
+  if (grid.dataset.ids === ids) {
+    for (const i of list) {
+      const t = grid.querySelector(`.tile[data-id="${i.id}"]`), L = look(i);
+      if (!t) continue;
+      t.className = L.cls;
+      if (L.off) t.setAttribute('aria-disabled', 'true'); else t.removeAttribute('aria-disabled');
+      const em = t.querySelector('.tile-meta em'); em.textContent = L.note; em.className = L.low ? 'low' : '';
+      const ck = t.querySelector('.tile-check');
+      if (L.on && !ck) t.insertAdjacentHTML('beforeend', `<span class="tile-check">${icon('check')}</span>`);
+      if (!L.on && ck) ck.remove();
+    }
+    return;
+  }
+  grid.dataset.ids = ids;
+  grid.innerHTML = list.map((i) => {
+    const b = brandOf(i.brand_id) || UNBRANDED, L = look(i);
+    return `<button class="${L.cls}" data-pos="pick" data-id="${i.id}" style="--c:${safeColor(b.color)}" ${L.off ? 'aria-disabled="true"' : ''}>
+      <span class="tile-name">${esc(i.name)}</span>
+      <span class="tile-meta"><b>${fmtMoney2(i.unit_price)}</b><em class="${L.low ? 'low' : ''}">${L.note}</em></span>
+      ${L.on ? `<span class="tile-check">${icon('check')}</span>` : ''}
+    </button>`;
+  }).join('');
+}
+
+function renderQty() {
+  const p = state.pos;
+  const it = p.selected ? posItem(p.selected) : null;
+  const av = it ? availFor(it) : 0;
+  if (it && p.qty > av) p.qty = Math.max(1, av);
+  const qi = $('#pos-qty');
+  if (qi && document.activeElement !== qi) qi.value = p.qty;
+  $('#qty-item').innerHTML = it
+    ? `<strong>${esc(it.name)}</strong><span>${fmtMoney2(it.unit_price)} each</span>`
+    : '<strong class="muted">Select an item</strong><span>Tap an item on the left</span>';
+  $('#qty-hint').textContent = it ? `${av} available in shop` : '';
+  $('#qty-hint').classList.toggle('bad', !!it && av <= 0);
+  $('[data-pos="dec"]').disabled = !it || p.qty <= 1;
+  $('[data-pos="inc"]').disabled = !it || p.qty >= av;
+  $('#pos-add').disabled = !it || av <= 0 || !(p.qty >= 1);
+  $('#pos-add span').textContent = it && p.qty > 0 ? `Add ${p.qty}` : 'Add';
+}
+
+function addToSheet() {
+  const p = state.pos;
+  const it = p.selected ? posItem(p.selected) : null;
+  if (!it) { toast('Select an item first', 'error'); return; }
+  const qty = parseInt($('#pos-qty')?.value, 10) || p.qty;
+  const av = availFor(it);
+  if (!(qty >= 1)) { toast('Quantity must be at least 1', 'error'); return; }
+  if (qty > av) { toast(`Only ${av} more ${it.name} in the shop`, 'error'); return; }
+  const line = p.lines.find((l) => l.item_id === it.id);
+  if (line) line.qty += qty;
+  else p.lines.push({ item_id: it.id, name: it.name, sku: it.sku, qty, unit_price: Number(it.unit_price) || 0 });
+  p.flash = it.id;
+  speak(`${it.name}, quantity ${qty}`);
+  p.qty = 1;
+  const qi = $('#pos-qty'); if (qi) qi.value = 1;
+  if (availFor(it) <= 0) p.selected = null;
+  renderSheet(); renderGrid(); renderQty();
+  $('#pos-q')?.focus({ preventScroll: true });
+}
+
+function setLineQty(id, qty) {
+  const p = state.pos, l = p.lines.find((x) => x.item_id === id), it = posItem(id);
+  if (!l) return;
+  const max = it ? it.shop_qty : l.qty;
+  if (qty < 1) qty = 1;
+  if (qty > max) { qty = max; toast(`Only ${max} ${l.name} in the shop`, 'error'); }
+  l.qty = qty;
+}
+
+/* ---------- step 2: customer ---------- */
+function renderCustomerStep() {
+  const p = state.pos, c = p.customer;
+  const tab = (mode, label, ic) => `<label><input type="radio" name="cmode" value="${mode}" ${c.mode === mode ? 'checked' : ''}><span>${icon(ic)}${label}</span></label>`;
+  let fields = '';
+  if (c.mode === 'private') {
+    fields = `<div class="cust-note">${icon('user')}<div><strong>Private customer</strong><span>The invoice will say “Private customer”. Address and number below are optional.</span></div></div>`;
+  } else if (c.mode === 'frequent') {
+    fields = state.customers.length
+      ? `<label class="field"><span>Frequent customer *</span>
+          <select id="cust-select" required>
+            <option value="">Choose a customer…</option>
+            ${state.customers.map((x) => `<option value="${x.id}" ${x.id === c.id ? 'selected' : ''}>${esc(x.name)}${x.phone ? ' · ' + esc(x.phone) : ''}</option>`).join('')}
+          </select></label>`
+      : `<div class="cust-note">${icon('users')}<div><strong>No frequent customers saved yet</strong><span>Choose <b>New customer</b> and tick “Save as frequent customer”. They'll appear here next time.</span></div></div>`;
+  } else {
+    fields = `<label class="field"><span>Customer name *</span><input id="cust-name" maxlength="80" value="${esc(c.name)}" placeholder="e.g. Ravi Patel" autocomplete="off"></label>
+      <label class="check save-check"><input type="checkbox" id="cust-save" ${c.save ? 'checked' : ''}><span><strong>Save as frequent customer</strong><small>They'll stay in the Frequent customer drop-down for next time.</small></span></label>`;
+  }
+  $('#pos-body').innerHTML = `
+    <main class="pos-step">
+      <section class="pos-card">
+        <header><h2>Customer details</h2><p>Who is this sale for?</p></header>
+        <fieldset class="field"><legend>Customer name</legend>
+          <div class="seg seg-3 cust-tabs">${tab('private', 'Private', 'user')}${tab('frequent', 'Frequent customer', 'users')}${tab('new', 'New customer', 'userPlus')}</div>
+        </fieldset>
+        ${fields}
+        <label class="field"><span>Address <small>(optional)</small></span><textarea id="cust-address" rows="2" maxlength="200">${esc(c.address)}</textarea></label>
+        <label class="field"><span>Contact number <small>(optional)</small></span><input id="cust-phone" type="tel" maxlength="30" value="${esc(c.phone)}" autocomplete="off"></label>
+      </section>
+      ${orderSummary()}
+    </main>
+    <footer class="pos-foot">
+      <button class="btn btn-glass btn-lg" data-pos="back">${icon('left')}Back to items</button>
+      <button class="btn btn-accent btn-lg" data-pos="cust-next">Submit ${icon('right')}</button>
+    </footer>`;
+}
+
+function orderSummary() {
+  const p = state.pos;
+  return `<aside class="pos-card pos-summary">
+    <header><h3>Order</h3><span class="muted">${p.lines.length} item${p.lines.length === 1 ? '' : 's'} · ${posUnits()} units</span></header>
+    <ul>${p.lines.map((l) => `<li><span class="q">${l.qty}×</span><span class="n">${esc(l.name)}</span><span class="a">${fmtMoney2(l.qty * l.unit_price)}</span></li>`).join('')}</ul>
+    <footer><span>Total</span><strong>${fmtMoney2(posTotal())}</strong></footer>
+  </aside>`;
+}
+
+function customerValid() {
+  const c = state.pos.customer;
+  if (c.mode === 'frequent' && !c.id) { toast('Choose a frequent customer from the list', 'error'); return false; }
+  if (c.mode === 'new' && !c.name.trim()) { toast('Enter the customer name', 'error'); $('#cust-name')?.focus(); return false; }
+  return true;
+}
+
+/* ---------- step 3: payment ---------- */
+function renderPaymentStep() {
+  const p = state.pos, total = posTotal();
+  const name = customerLabel();
+  $('#pos-body').innerHTML = `
+    <main class="pos-step">
+      <section class="pos-card pay-card">
+        <div class="due-box"><small>Amount due</small><strong>${fmtMoney2(total)}</strong><span>${p.lines.length} item${p.lines.length === 1 ? '' : 's'} · ${esc(name)}</span></div>
+        <label class="check pay-full"><input type="checkbox" id="pay-full" ${p.pay.full ? 'checked' : ''}><span><strong>Paid in full</strong><small>The customer has paid the whole ${fmtMoney2(total)}</small></span></label>
+        <label class="field"><span>Partial payment</span>
+          <div class="money-input"><b>${esc(currencySymbol())}</b><input id="pay-amount" type="number" min="0" max="${total}" step="0.01" inputmode="decimal" placeholder="0.00" value="${p.pay.full ? total.toFixed(2) : esc(p.pay.amount)}"></div>
+          <small>Amount received now. Whatever is left goes to <b>Not Fully Paid</b>.</small></label>
+        <div class="pay-calc" id="pay-calc"></div>
+        <fieldset class="field"><legend>Mode of payment</legend>
+          <div class="seg seg-3">${PAY_METHODS.map(([m, ic]) => `<label><input type="radio" name="pmethod" value="${m}" ${p.pay.method === m ? 'checked' : ''}><span>${icon(ic)}${m}</span></label>`).join('')}</div>
+        </fieldset>
+        <p class="pay-tip" id="pay-tip" hidden>${icon('alert')}<span>This customer is “Private”. Go back and add a name or number so you know who owes the rest.</span></p>
+      </section>
+      ${orderSummary()}
+    </main>
+    <footer class="pos-foot">
+      <button class="btn btn-glass btn-lg" data-pos="back">${icon('left')}Back</button>
+      <button class="btn btn-accent btn-lg" data-pos="record" id="pos-record">${icon('file')}Generate Invoice &amp; Record Sale</button>
+    </footer>`;
+  updatePayCalc();
+}
+
+function paidNow() {
+  const p = state.pos, total = posTotal();
+  if (p.pay.full) return total;
+  const v = Number(p.pay.amount);
+  return Number.isFinite(v) ? round2(v) : 0;
+}
+function updatePayCalc() {
+  const p = state.pos, total = posTotal(), paid = paidNow(), left = round2(total - paid);
+  const bad = paid < 0 || paid > total;
+  const el = $('#pay-calc');
+  el.className = `pay-calc ${bad ? 'error' : left > 0 ? 'warn' : 'ok'}`;
+  el.innerHTML = bad
+    ? `${icon('alert')}<span>Payment must be between ${fmtMoney2(0)} and ${fmtMoney2(total)}</span>`
+    : `<div><small>Paid now</small><strong>${fmtMoney2(paid)}</strong></div><div><small>Outstanding</small><strong>${fmtMoney2(left)}</strong></div>
+       <div><small>Status</small><strong>${left <= 0 ? 'Paid in full' : paid > 0 ? 'Part paid' : 'Unpaid'}</strong></div>`;
+  $('#pay-tip').hidden = !(left > 0 && p.customer.mode === 'private' && !p.customer.phone.trim());
+  $('#pos-record').disabled = bad || p.busy;
+}
+
+const customerLabel = () => {
+  const c = state.pos.customer;
+  if (c.mode === 'private') return 'Private customer';
+  if (c.mode === 'frequent') return state.customers.find((x) => x.id === c.id)?.name || 'Frequent customer';
+  return c.name.trim() || 'New customer';
+};
+
+async function recordSale() {
+  const p = state.pos, total = posTotal(), paid = paidNow();
+  if (paid < 0 || paid > total) { toast('Check the payment amount', 'error'); return; }
+  const btn = $('#pos-record');
+  p.busy = true; btn.disabled = true; btn.classList.add('loading');
+  const c = p.customer;
+  const { data, error } = await sb.rpc('record_sale', {
+    p_lines: p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: round2(l.unit_price) })),
+    p_customer: { mode: c.mode, id: c.id || null, name: c.mode === 'private' ? null : c.name.trim(), address: c.address.trim(), phone: c.phone.trim(), save: c.save },
+    p_paid: paid,
+    p_method: p.pay.method,
+  });
+  p.busy = false; btn.classList.remove('loading'); btn.disabled = false;
+  if (error) { toast(niceError(error), 'error'); return; }
+  await loadAll();
+  const sale = saleById(data.id) || normalizeSale({ ...data, sale_items: [], sale_payments: [] });
+  p.sale = sale;
+  p.step = 'done';
+  renderPOS();
+  downloadInvoice(sale);
+}
+
+/* ---------- step 4: done ---------- */
+function renderDoneStep() {
+  const s = state.pos.sale;
+  const [label, tone] = SALE_STATUS[saleStatus(s)];
+  $('#pos-body').innerHTML = `
+    <main class="pos-step pos-done">
+      <div class="done-card">
+        <div class="done-check">${icon('check')}</div>
+        <h2>Sale recorded</h2>
+        <p class="done-inv">Invoice <strong>${esc(s.invoice_no)}</strong> · ${esc(s.customer_name)}</p>
+        <div class="done-figs">
+          <div><small>Total</small><strong>${fmtMoney2(s.total)}</strong></div>
+          <div><small>Paid</small><strong>${fmtMoney2(s.amount_paid)}</strong></div>
+          <div><small>Outstanding</small><strong class="${owed(s) > 0 ? 'bad' : ''}">${fmtMoney2(owed(s))}</strong></div>
+        </div>
+        <span class="badge ${tone}">${label} · ${esc(s.payment_method)}</span>
+        <p class="muted">${unitsOf(s)} unit${unitsOf(s) === 1 ? '' : 's'} taken off shop stock. The invoice PDF has downloaded${owed(s) > 0 ? ', and the balance is listed under <b>Not Fully Paid</b>' : ''}.</p>
+        <div class="done-actions">
+          <button class="btn btn-ghost" data-pos="pdf">${icon('download')}Download PDF again</button>
+          ${canShareFiles() ? `<button class="btn btn-ghost" data-pos="share">${icon('share')}Send to customer</button>` : ''}
+          <button class="btn btn-ghost" data-pos="invoices">${icon('receipt')}View invoices</button>
+          <button class="btn btn-accent" data-pos="new">${icon('plus')}New sale</button>
+        </div>
+      </div>
+    </main>`;
+}
+
+/* ---------- counter events ---------- */
+function posClick(e) {
+  const el = e.target.closest('[data-pos]');
+  if (!el || !state.pos) return;
+  const p = state.pos, id = el.dataset.id;
+  switch (el.dataset.pos) {
+    case 'close': closePOS(); break;
+    case 'mute': setMuted(!isMuted()); if (isMuted()) try { speechSynthesis.cancel(); } catch { /* */ }
+      el.outerHTML = `<button class="pos-icon" data-pos="mute" title="${isMuted() ? 'Turn voice on' : 'Mute voice'}" aria-pressed="${isMuted()}">${icon(isMuted() ? 'mute' : 'volume')}<span class="hide-sm">${isMuted() ? 'Muted' : 'Voice on'}</span></button>`;
+      break;
+    case 'brand': p.brand = id; $$('.chip', $('#pos')).forEach((c) => c.classList.toggle('on', c.dataset.id === id)); renderGrid(); break;
+    case 'pick': {
+      const it = posItem(id);
+      if (!it || availFor(it) <= 0) { toast(it && !sellable(it) ? `${it.name} has no stock in the shop` : 'All of this item is already in the sheet', 'error'); return; }
+      p.selected = p.selected === id ? null : id; p.qty = 1;
+      renderGrid(); renderQty();
+      if (p.selected && matchMedia('(min-width: 761px)').matches) $('#pos-qty')?.select();
+      break;
+    }
+    case 'dec': p.qty = Math.max(1, (parseInt($('#pos-qty').value, 10) || p.qty) - 1); $('#pos-qty').value = p.qty; renderQty(); break;
+    case 'inc': p.qty = (parseInt($('#pos-qty').value, 10) || p.qty) + 1; $('#pos-qty').value = p.qty; renderQty(); break;
+    case 'add': addToSheet(); break;
+    case 'line-dec': { const l = p.lines.find((x) => x.item_id === id); if (l && l.qty > 1) { setLineQty(id, l.qty - 1); renderSheet(); renderGrid(); renderQty(); } break; }
+    case 'line-inc': { const l = p.lines.find((x) => x.item_id === id); if (l) { setLineQty(id, l.qty + 1); renderSheet(); renderGrid(); renderQty(); } break; }
+    case 'remove': p.lines = p.lines.filter((x) => x.item_id !== id); renderSheet(); renderGrid(); renderQty(); break;
+    case 'clear':
+      confirmModal({ title: 'Clear the sales sheet?', confirmLabel: 'Clear sheet', message: 'All items will be removed from this sale.',
+        onConfirm: async () => { p.lines = []; renderSheet(); renderGrid(); renderQty(); } });
+      break;
+    case 'submit': {
+      if (!p.lines.length) return;
+      openModal({
+        title: 'Submit this order?', submitLabel: 'Yes, submit order',
+        body: `<p class="confirm-text">Please check the order before continuing.</p>
+          <ul class="confirm-list">${p.lines.map((l) => `<li><span>${l.qty} × ${esc(l.name)}</span><b>${fmtMoney2(l.qty * l.unit_price)}</b></li>`).join('')}</ul>
+          <div class="confirm-total"><span>Total · ${posUnits()} units</span><strong>${fmtMoney2(posTotal())}</strong></div>
+          <p class="confirm-text">Next you'll add the customer details and payment. Stock is only taken off when you record the sale.</p>`,
+        onSubmit: async () => { p.step = 'customer'; renderPOS(); },
+      });
+      break;
+    }
+    case 'back': p.step = p.step === 'payment' ? 'customer' : 'items'; renderPOS(); break;
+    case 'cust-next': if (customerValid()) { p.step = 'payment'; renderPOS(); } break;
+    case 'record': recordSale(); break;
+    case 'pdf': downloadInvoice(p.sale); break;
+    case 'share': shareInvoice(p.sale); break;
+    case 'invoices': closePOS(); go('#/invoices'); break;
+    case 'new': state.pos = freshPOS(); renderPOS(); break;
+  }
+}
+
+function posInput(e) {
+  const p = state.pos, t = e.target;
+  if (!p) return;
+  if ((t.type === 'checkbox' || t.type === 'radio' || t.tagName === 'SELECT') && e.type === 'input') return;
+  if (t.id === 'pos-q') { if (e.type === 'input') { p.q = t.value; renderGrid(); } return; }
+  if (t.id === 'pos-qty') {
+    const v = parseInt(t.value, 10);
+    p.qty = v > 0 ? v : 0;
+    const it = p.selected ? posItem(p.selected) : null;
+    if (it && e.type === 'change') { const av = availFor(it); if (p.qty > av) { p.qty = av; t.value = av; toast(`Only ${av} available in the shop`, 'error'); } if (p.qty < 1) { p.qty = 1; t.value = 1; } }
+    renderQty();
+    return;
+  }
+  if (t.dataset.line) {
+    const id = t.dataset.id, l = p.lines.find((x) => x.item_id === id);
+    if (!l) return;
+    if (t.dataset.line === 'price') {
+      const v = Number(t.value);
+      l.unit_price = Number.isFinite(v) && v >= 0 ? round2(v) : 0;
+      if (e.type === 'change') t.value = l.unit_price.toFixed(2);
+    } else {
+      const v = parseInt(t.value, 10);
+      if (e.type === 'change' || v > 0) setLineQty(id, v > 0 ? v : 1);
+      if (e.type === 'change') {
+        t.value = l.qty;
+        const it = posItem(id), inc = t.parentElement.querySelector('[data-pos="line-inc"]');
+        if (inc) inc.disabled = !!it && l.qty >= it.shop_qty;
+        renderGrid(); renderQty();
+      }
+    }
+    const amt = $(`[data-amt="${id}"]`); if (amt) amt.textContent = fmtMoney2(l.qty * l.unit_price);
+    updateTotals();
+    return;
+  }
+  // customer step
+  const c = p.customer;
+  if (t.name === 'cmode') { c.mode = t.value; renderCustomerStep(); return; }
+  if (t.id === 'cust-select') {
+    c.id = t.value;
+    const x = state.customers.find((k) => k.id === t.value);
+    c.name = x?.name || '';
+    if (e.type === 'change') { c.address = x?.address || ''; c.phone = x?.phone || ''; $('#cust-address').value = c.address; $('#cust-phone').value = c.phone; }
+    return;
+  }
+  if (t.id === 'cust-name') { c.name = t.value; return; }
+  if (t.id === 'cust-save') { c.save = t.checked; return; }
+  if (t.id === 'cust-address') { c.address = t.value; return; }
+  if (t.id === 'cust-phone') { c.phone = t.value; return; }
+  // payment step
+  if (t.id === 'pay-full') {
+    p.pay.full = t.checked;
+    p.pay.amount = t.checked ? '' : '';
+    $('#pay-amount').value = t.checked ? posTotal().toFixed(2) : '';
+    if (!t.checked) $('#pay-amount').focus();
+    updatePayCalc(); return;
+  }
+  if (t.id === 'pay-amount') {
+    p.pay.amount = t.value;
+    const v = Number(t.value);
+    p.pay.full = t.value !== '' && round2(v) === posTotal();
+    $('#pay-full').checked = p.pay.full;
+    updatePayCalc(); return;
+  }
+  if (t.name === 'pmethod') { p.pay.method = t.value; return; }
+}
+
+function posKey(e) {
+  if (!state.pos) return;
+  if (e.key === 'Escape' && !$('#modal').open) { e.preventDefault(); closePOS(); return; }
+  if (e.key !== 'Enter' || state.pos.step !== 'items') return;
+  if (e.target.id === 'pos-qty') { e.preventDefault(); e.target.dispatchEvent(new Event('change', { bubbles: true })); addToSheet(); }
+  else if (e.target.id === 'pos-q') {
+    e.preventDefault();
+    const first = $('#pos-grid .tile:not(.off)');
+    if (first) { state.pos.selected = first.dataset.id; state.pos.qty = 1; renderGrid(); renderQty(); $('#pos-qty').select(); }
+  }
+}
+
+/* =====================================================================
+   INVOICES TAB
+===================================================================== */
+function renderInvoices() {
+  state.scope = null;
+  const head = `<section class="page-head">
+    <div><p class="eyebrow">Sales</p><h1>Invoices</h1></div>
+    <div class="head-actions">
+      <button class="btn btn-ghost" data-act="customers">${icon('users')}Frequent customers</button>
+      <button class="btn btn-ghost" data-act="shop-settings">${icon('settings')}Invoice details</button>
+      <button class="btn btn-accent" data-act="pos-open">${icon('cart')}Live Sales Counter</button>
+    </div></section>`;
+  if (state.salesError) { $('#main').innerHTML = head + salesSetupNotice(); return; }
+  const st = salesStats();
+  if (!state.sales.length) {
+    $('#main').innerHTML = head + `<section class="card"><div class="empty">${icon('receipt')}<h3>No invoices yet</h3>
+      <p>Every sale made on the Live Sales Counter creates an invoice here, ready to download as a PDF.</p>
+      <div class="empty-actions"><button class="btn btn-accent" data-act="pos-open">${icon('cart')}Open Live Sales Counter</button></div></div></section>`;
+    return;
+  }
+  $('#main').innerHTML = head + `
+    <section class="kpis kpis-6">
+      ${kpi("Today's sales", fmtMoney2(st.today), 'cart', '', `${st.todayN} invoice${st.todayN === 1 ? '' : 's'}`)}
+      ${kpi('Last 7 days', fmtMoney2(st.week), 'activity')}
+      ${kpi('This month', fmtMoney2(st.month), 'receipt', '', `${st.monthN} invoice${st.monthN === 1 ? '' : 's'}`)}
+      ${kpi('All sales', fmtMoney2(st.all), 'layers', 'navy', `${state.sales.length} invoices`)}
+      ${kpi('Collected', fmtMoney2(st.collected), 'coin', 'ok')}
+      ${kpi('Still owed', fmtMoney2(st.owed), 'wallet', st.owed > 0 ? 'bad' : 'ok', `<a href="#/unpaid">${st.owedN} not fully paid →</a>`)}
+    </section>
+    <section class="grid">
+      <article class="card span-2">
+        <header class="card-head"><div><h3>Daily sales</h3><p>Last 14 days · collected and still owed</p></div></header>
+        <div class="chart-box"><canvas id="ch-sales"></canvas></div>
+      </article>
+      <article class="card">
+        <header class="card-head"><div><h3>How customers paid</h3><p>Money received by payment method</p></div></header>
+        <div class="chart-box"><canvas id="ch-methods"></canvas></div>
+      </article>
+    </section>
+    <section class="card table-card" id="sales-list">
+      <div class="toolbar">
+        <div class="tb-title"><h3>All invoices</h3><span class="muted" id="sales-count"></span></div>
+        <div class="tb-controls">
+          <label class="search">${icon('search')}<input id="s-q" type="search" placeholder="Search invoice, customer or item" value="${esc(state.salesFilters.q)}" aria-label="Search invoices"></label>
+          <select id="s-status" aria-label="Payment status">
+            ${[['all', 'Any status'], ['paid', 'Paid'], ['partial', 'Part paid'], ['unpaid', 'Unpaid']].map(([v, l]) => `<option value="${v}" ${state.salesFilters.status === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="sales-wrap"></div>
+    </section>`;
+  $('#s-q').addEventListener('input', (e) => { state.salesFilters.q = e.target.value; renderSalesTable(); });
+  $('#s-status').addEventListener('change', (e) => { state.salesFilters.status = e.target.value; renderSalesTable(); });
+  renderSalesTable();
+  drawSalesCharts();
+}
+
+function renderSalesTable() {
+  const wrap = $('#sales-wrap');
+  if (!wrap) return;
+  const f = state.salesFilters;
+  let rows = state.sales.slice();
+  if (f.status !== 'all') rows = rows.filter((s) => saleStatus(s) === f.status);
+  if (f.q.trim()) {
+    const q = f.q.trim().toLowerCase();
+    rows = rows.filter((s) => [s.invoice_no, s.customer_name, s.customer_phone, ...s.items.map((l) => l.item_name)].some((v) => v && v.toLowerCase().includes(q)));
+  }
+  $('#sales-count').textContent = rows.length === state.sales.length ? `${rows.length} invoice${rows.length === 1 ? '' : 's'}` : `${rows.length} of ${state.sales.length}`;
+  if (!rows.length) { wrap.innerHTML = `<div class="empty">${icon('search')}<h3>No invoices match</h3><p>Try a different search or status.</p></div>`; return; }
+  wrap.innerHTML = `<div class="table-scroll"><table class="inv sales">
+    <thead><tr><th>Invoice</th><th>Customer</th><th class="num">Items</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Balance</th><th>Status</th><th class="num"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>${rows.map((s) => {
+      const st = saleStatus(s), [label, tone] = SALE_STATUS[st];
+      return `<tr class="row-${st === 'paid' ? 'ok' : st === 'partial' ? 'low' : 'out'}">
+        <td><div class="item-cell"><strong>${esc(s.invoice_no)}</strong><small>${fmtDateTime(s.created_at)}</small></div></td>
+        <td><div class="item-cell"><strong>${esc(s.customer_name)}</strong><small>${esc(s.customer_phone || (s.is_private ? 'Private' : ''))}</small></div></td>
+        <td class="num">${unitsOf(s)}</td>
+        <td class="num strong">${fmtMoney2(s.total)}</td>
+        <td class="num">${fmtMoney2(s.amount_paid)}</td>
+        <td class="num ${owed(s) > 0 ? 'qty-zero' : 'muted'}">${fmtMoney2(owed(s))}</td>
+        <td><div class="badges"><span class="badge ${tone}">${label}</span><small class="muted">${esc(s.payment_method)}</small></div></td>
+        <td class="actions">
+          <button class="icon-btn" data-act="inv-view" data-id="${s.id}" title="View invoice">${icon('eye')}</button>
+          <button class="icon-btn" data-act="inv-pdf" data-id="${s.id}" title="Download PDF">${icon('download')}</button>
+          ${owed(s) > 0 ? `<button class="icon-btn" data-act="pay" data-id="${s.id}" title="Record a payment">${icon('wallet')}</button>` : ''}
+        </td></tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function drawSalesCharts() {
+  const c = colors(); chartDefaults(c);
+  const days = 14, labels = [], paid = [], due = [], idx = {};
+  const start = dayStart(); start.setDate(start.getDate() - (days - 1));
+  for (let d = 0; d < days; d++) {
+    const dt = new Date(start); dt.setDate(start.getDate() + d);
+    idx[dayKey(dt)] = d; labels.push(dt.toLocaleDateString(CONFIG.LOCALE, { day: 'numeric', month: 'short' })); paid.push(0); due.push(0);
+  }
+  for (const s of state.sales) {
+    const k = dayKey(new Date(s.created_at));
+    if (k in idx) { paid[idx[k]] = round2(paid[idx[k]] + s.amount_paid); due[idx[k]] = round2(due[idx[k]] + owed(s)); }
+  }
+  mkChart('ch-sales', {
+    type: 'bar',
+    data: { labels, datasets: [
+      { label: 'Collected', data: paid, backgroundColor: c.ok, borderRadius: 5, maxBarThickness: 22 },
+      { label: 'Still owed', data: due, backgroundColor: c.bad, borderRadius: 5, maxBarThickness: 22 },
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { callback: (v) => fmtMoneyShort(v) } } },
+      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { mode: 'index', intersect: false, callbacks: { label: (x) => ` ${x.dataset.label}: ${fmtMoney2(x.raw)}`, footer: (it) => `Sales: ${fmtMoney2(it.reduce((a, x) => a + x.raw, 0))}` } } },
+    },
+  });
+  const by = {};
+  for (const s of state.sales) for (const p of s.payments) by[p.method] = round2((by[p.method] || 0) + p.amount);
+  const methods = PAY_METHODS.map(([m]) => m).filter((m) => by[m]);
+  doughnut('ch-methods', methods, methods.map((m) => by[m]), [c.ok, c.sky, '#8b5cf6'].slice(0, methods.length),
+    fmtMoney(Object.values(by).reduce((a, b) => a + b, 0)), 'collected', fmtMoney2);
+}
+
+/* =====================================================================
+   NOT FULLY PAID TAB
+===================================================================== */
+function renderUnpaid() {
+  state.scope = null;
+  const head = `<section class="page-head">
+    <div><p class="eyebrow">Money owed to the shop</p><h1>Not Fully Paid</h1></div>
+    <div class="head-actions"><button class="btn btn-accent" data-act="pos-open">${icon('cart')}Live Sales Counter</button></div></section>`;
+  if (state.salesError) { $('#main').innerHTML = head + salesSetupNotice(); return; }
+  const list = unpaidSales().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  if (!list.length) {
+    $('#main').innerHTML = head + `<section class="card"><div class="empty all-paid">${icon('check')}<h3>Everyone has paid in full</h3>
+      <p>Sales with a partial payment, or no payment yet, will appear here with the amount still owed.</p></div></section>`;
+    return;
+  }
+  const total = round2(list.reduce((a, s) => a + owed(s), 0));
+  const billed = round2(list.reduce((a, s) => a + s.total, 0));
+  const got = round2(list.reduce((a, s) => a + s.amount_paid, 0));
+  const groups = {};
+  for (const s of list) {
+    const g = groups[owerKey(s)] ||= { name: owerName(s), phone: s.customer_phone, owed: 0, n: 0, oldest: s.created_at };
+    g.owed = round2(g.owed + owed(s)); g.n++; if (!g.phone && s.customer_phone) g.phone = s.customer_phone;
+  }
+  const people = Object.values(groups).sort((a, b) => b.owed - a.owed);
+  const oldest = daysSince(list[0].created_at);
+  const chartH = Math.max(220, Math.min(people.length, 10) * 34 + 60);
+
+  $('#main').innerHTML = head + `
+    <section class="kpis">
+      ${kpi('Still to be paid', fmtMoney2(total), 'wallet', 'bad', `from ${fmtMoney2(billed)} invoiced`)}
+      ${kpi('Invoices not fully paid', fmtNum(list.length), 'receipt', 'warn', `${list.filter((s) => s.amount_paid > 0).length} part paid · ${list.filter((s) => !s.amount_paid).length} unpaid`)}
+      ${kpi('Customers owing', fmtNum(people.length), 'users', '', people[0] ? `Most: ${esc(people[0].name)}` : '')}
+      ${kpi('Oldest balance', ageLabel(oldest), 'alert', oldest > 30 ? 'bad' : oldest > 7 ? 'warn' : '', `Since ${fmtDate(list[0].created_at)}`)}
+    </section>
+    <section class="grid">
+      <article class="card span-2">
+        <header class="card-head"><div><h3>Who owes the most</h3><p>Outstanding balance per customer${people.length > 10 ? ' · top 10' : ''}</p></div></header>
+        <div class="chart-box" style="height:${chartH}px"><canvas id="ch-owed"></canvas></div>
+      </article>
+      <article class="card">
+        <header class="card-head"><div><h3>Collected so far</h3><p>On these ${list.length} invoices</p></div></header>
+        <div class="chart-box"><canvas id="ch-collect"></canvas></div>
+      </article>
+    </section>
+    <section class="grid owe-people">${people.slice(0, 6).map((g) => `
+      <article class="card owe-card">
+        <div class="owe-top"><span class="owe-avatar">${esc(g.name.trim().charAt(0).toUpperCase() || '?')}</span>
+          <div><strong>${esc(g.name)}</strong><small>${g.n} invoice${g.n === 1 ? '' : 's'} · oldest ${ageLabel(daysSince(g.oldest)).toLowerCase()}</small></div></div>
+        <div class="owe-amt">${fmtMoney2(g.owed)}</div>
+        ${g.phone ? `<a class="btn btn-sm btn-soft" href="tel:${esc(g.phone.replace(/[^\d+]/g, ''))}">${icon('phone')}${esc(g.phone)}</a>` : '<span class="muted owe-nophone">No contact number</span>'}
+      </article>`).join('')}
+    </section>
+    <section class="card table-card">
+      <div class="toolbar"><div class="tb-title"><h3>Outstanding invoices</h3><span class="muted">Oldest first</span></div></div>
+      <div class="table-scroll"><table class="inv sales">
+        <thead><tr><th>Invoice</th><th>Customer</th><th>Contact</th><th class="num">Age</th><th class="num">Total</th><th class="num">Paid</th><th class="num">Outstanding</th><th class="num"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody>${list.map((s) => {
+          const age = daysSince(s.created_at);
+          return `<tr class="row-${s.amount_paid > 0 ? 'low' : 'out'}">
+            <td><div class="item-cell"><strong>${esc(s.invoice_no)}</strong><small>${fmtDate(s.created_at)} · ${fmtTime(s.created_at)}</small></div></td>
+            <td><div class="item-cell"><strong>${esc(s.customer_name)}</strong><small>${esc(s.customer_address || '')}</small></div></td>
+            <td>${s.customer_phone ? `<a class="tel" href="tel:${esc(s.customer_phone.replace(/[^\d+]/g, ''))}">${esc(s.customer_phone)}</a>` : '<span class="muted">—</span>'}</td>
+            <td class="num ${age > 30 ? 'qty-zero' : ''}">${ageLabel(age)}</td>
+            <td class="num">${fmtMoney2(s.total)}</td>
+            <td class="num">${fmtMoney2(s.amount_paid)}</td>
+            <td class="num"><strong class="owed-amt">${fmtMoney2(owed(s))}</strong></td>
+            <td class="actions">
+              <button class="btn btn-sm btn-primary" data-act="pay" data-id="${s.id}">${icon('wallet')}Record payment</button>
+              <button class="icon-btn" data-act="inv-view" data-id="${s.id}" title="View invoice">${icon('eye')}</button>
+              <button class="icon-btn" data-act="inv-pdf" data-id="${s.id}" title="Download PDF">${icon('download')}</button>
+            </td></tr>`;
+        }).join('')}</tbody></table></div>
+    </section>`;
+
+  const c = colors(); chartDefaults(c);
+  const top = people.slice(0, 10);
+  mkChart('ch-owed', {
+    type: 'bar',
+    data: { labels: top.map((g) => shorten(g.name)), datasets: [{ label: 'Owed', data: top.map((g) => g.owed), backgroundColor: c.bad, borderRadius: 5, maxBarThickness: 22 }] },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      scales: { x: { beginAtZero: true, ticks: { callback: (v) => fmtMoneyShort(v) } }, y: { grid: { display: false } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (x) => ` ${fmtMoney2(x.raw)} owed · ${top[x.dataIndex].n} invoice(s)` } } },
+    },
+  });
+  doughnut('ch-collect', ['Collected', 'Still owed'], [got, total], [c.ok, c.bad],
+    `${billed ? Math.round((got / billed) * 100) : 0}%`, 'collected', fmtMoney2);
+}
+
+/* =====================================================================
+   SALES MODALS
+===================================================================== */
+function saleModal(s) {
+  const st = saleStatus(s), [label, tone] = SALE_STATUS[st];
+  openModal({
+    title: `Invoice ${s.invoice_no}`,
+    submitLabel: 'Download PDF',
+    extraFooter: `${owed(s) > 0 ? `<button type="button" class="btn btn-soft" data-act="pay" data-id="${s.id}">${icon('wallet')}Record payment</button>` : ''}
+      ${canShareFiles() ? `<button type="button" class="btn btn-ghost" data-act="inv-share" data-id="${s.id}">${icon('share')}Send</button>` : ''}`,
+    body: `
+      <div class="inv-meta">
+        <div><small>Customer</small><strong>${esc(s.customer_name)}</strong>
+          ${s.customer_address ? `<span>${esc(s.customer_address)}</span>` : ''}${s.customer_phone ? `<span>${esc(s.customer_phone)}</span>` : ''}</div>
+        <div><small>Date</small><strong>${fmtDateTime(s.created_at)}</strong><span class="badge ${tone}">${label} · ${esc(s.payment_method)}</span></div>
+      </div>
+      <ul class="confirm-list">${s.items.map((l) => `<li><span>${l.qty} × ${esc(l.item_name)} <small class="muted">@ ${fmtMoney2(l.unit_price)}</small></span><b>${fmtMoney2(l.line_total)}</b></li>`).join('')}</ul>
+      <div class="inv-totals">
+        <div><span>Total</span><strong>${fmtMoney2(s.total)}</strong></div>
+        <div><span>Paid</span><strong class="ok">${fmtMoney2(s.amount_paid)}</strong></div>
+        <div><span>Outstanding</span><strong class="${owed(s) > 0 ? 'bad' : ''}">${fmtMoney2(owed(s))}</strong></div>
+      </div>
+      ${s.payments.length ? `<div><p class="eyebrow">Payments received</p><ul class="pay-hist">${s.payments.map((p) => `<li><span>${fmtDateTime(p.created_at)} · ${esc(p.method)}${p.note ? ` · ${esc(p.note)}` : ''}</span><b>${fmtMoney2(p.amount)}</b></li>`).join('')}</ul></div>` : ''}`,
+    onSubmit: async () => { downloadInvoice(s); return false; },
+  });
+}
+
+function paymentModal(s) {
+  const due = owed(s);
+  const form = openModal({
+    title: 'Record a payment',
+    submitLabel: 'Save payment',
+    body: `
+      <div class="adj-head"><div><strong>${esc(s.customer_name)}</strong><br><small class="muted">Invoice ${esc(s.invoice_no)} · ${fmtDate(s.created_at)}</small></div>
+        <div class="adj-now"><span>Total <b>${fmtMoney2(s.total)}</b></span><span>Owed <b class="owed-amt">${fmtMoney2(due)}</b></span></div></div>
+      <label class="field"><span>Amount received</span>
+        <div class="money-input"><b>${esc(currencySymbol())}</b><input name="amount" type="number" min="0.01" max="${due}" step="0.01" inputmode="decimal" required value="${due.toFixed(2)}"></div></label>
+      <div class="quick-amts"><button type="button" class="btn btn-sm btn-soft" data-fill="${due}">Full balance ${fmtMoney2(due)}</button>
+        ${due >= 2 ? `<button type="button" class="btn btn-sm btn-ghost" data-fill="${round2(due / 2)}">Half ${fmtMoney2(due / 2)}</button>` : ''}</div>
+      <fieldset class="field"><legend>Mode of payment</legend>
+        <div class="seg seg-3">${PAY_METHODS.map(([m, ic], i) => `<label><input type="radio" name="method" value="${m}" ${i === 0 ? 'checked' : ''}><span>${icon(ic)}${m}</span></label>`).join('')}</div></fieldset>
+      <label class="field"><span>Note <small>(optional)</small></span><input name="note" maxlength="120" placeholder="e.g. Paid by his son"></label>
+      <p class="adj-preview" id="pay-preview"></p>`,
+    onSubmit: async (fd) => {
+      const amount = round2(fd.get('amount'));
+      if (!(amount > 0) || amount > due) { toast(`Enter an amount between ${fmtMoney2(0.01)} and ${fmtMoney2(due)}`, 'error'); return false; }
+      const { error } = await sb.rpc('add_payment', { p_sale: s.id, p_amount: amount, p_method: fd.get('method'), p_note: String(fd.get('note') || '').trim() || null });
+      if (error) { toast(niceError(error), 'error'); return false; }
+      toast(amount >= due ? `${s.invoice_no} is now paid in full` : `${fmtMoney2(amount)} recorded · ${fmtMoney2(due - amount)} still owed`);
+      await refresh();
+    },
+  });
+  const amt = form.elements.namedItem('amount'), prev = $('#pay-preview', form);
+  const upd = () => {
+    const v = round2(amt.value || 0), bad = !(v > 0) || v > due;
+    prev.classList.toggle('error', bad);
+    prev.textContent = bad ? `Enter between ${fmtMoney2(0.01)} and ${fmtMoney2(due)}` : v >= due ? 'This clears the invoice — it will move out of Not Fully Paid.' : `After this: ${fmtMoney2(due - v)} still owed`;
+    form.querySelector('[type=submit]').disabled = bad;
+  };
+  amt.addEventListener('input', upd);
+  $$('[data-fill]', form).forEach((b) => b.addEventListener('click', () => { amt.value = Number(b.dataset.fill).toFixed(2); upd(); }));
+  upd();
+}
+
+function shopModal() {
+  const s = state.shop || {};
+  openModal({
+    title: 'Invoice details',
+    submitLabel: 'Save details',
+    body: `<p class="confirm-text">These details are printed at the top and bottom of every invoice.</p>
+      <div class="form-grid">
+        <label class="field span-2"><span>Shop name</span><input name="shop_name" required maxlength="60" value="${esc(s.shop_name || 'AKASH SHOP C1')}"></label>
+        <label class="field span-2"><span>Address</span><textarea name="address" rows="2" maxlength="200">${esc(s.address || '')}</textarea></label>
+        <label class="field"><span>Phone</span><input name="phone" type="tel" maxlength="30" value="${esc(s.phone || '')}"></label>
+        <label class="field"><span>Email</span><input name="email" type="email" maxlength="80" value="${esc(s.email || '')}"></label>
+        <label class="field span-2"><span>Message at the bottom</span><input name="footer_note" required maxlength="80" value="${esc(s.footer_note || 'Thanks For Shopping With Us')}"></label>
+      </div>`,
+    onSubmit: async (fd) => {
+      const payload = {};
+      for (const k of ['shop_name', 'address', 'phone', 'email', 'footer_note']) payload[k] = String(fd.get(k) || '').trim() || null;
+      payload.shop_name ||= 'AKASH SHOP C1';
+      payload.footer_note ||= 'Thanks For Shopping With Us';
+      const { error } = await sb.from('shop_settings').update(payload).eq('id', 1);
+      if (error) { toast(niceError(error), 'error'); return false; }
+      toast('Invoice details saved');
+      await refresh();
+    },
+  });
+}
+
+function customersModal() {
+  const list = state.customers;
+  const form = openModal({
+    title: 'Frequent customers',
+    submitLabel: 'Add customer',
+    body: `<p class="confirm-text">Saved customers appear in the <b>Frequent customer</b> drop-down on the sales counter.</p>
+      <div class="form-grid">
+        <label class="field span-2"><span>Name *</span><input name="name" required maxlength="80" placeholder="e.g. Ravi Patel"></label>
+        <label class="field"><span>Contact number</span><input name="phone" type="tel" maxlength="30"></label>
+        <label class="field"><span>Address</span><input name="address" maxlength="200"></label>
+      </div>
+      <div><p class="eyebrow">${list.length} saved</p>
+      ${list.length ? `<ul class="cust-list">${list.map((c) => `<li><span class="owe-avatar sm">${esc(c.name.charAt(0).toUpperCase())}</span>
+        <div><strong>${esc(c.name)}</strong><small>${esc([c.phone, c.address].filter(Boolean).join(' · ') || 'No details')}</small></div>
+        <button type="button" class="btn btn-sm btn-danger-ghost" data-cdel="${c.id}">Remove</button></li>`).join('')}</ul>`
+        : '<p class="muted">No frequent customers yet.</p>'}</div>`,
+    onSubmit: async (fd) => {
+      const payload = { name: String(fd.get('name')).trim(), phone: String(fd.get('phone') || '').trim() || null, address: String(fd.get('address') || '').trim() || null };
+      if (!payload.name) return false;
+      const { error } = await sb.from('customers').insert(payload);
+      if (error) { toast(error.code === '23505' ? 'A customer with that name already exists' : niceError(error), 'error'); return false; }
+      toast(`${payload.name} saved as a frequent customer`);
+      await loadAll();
+      customersModal();
+      return false;
+    },
+  });
+  $$('[data-cdel]', form).forEach((b) => b.addEventListener('click', async () => {
+    if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.textContent = 'Tap again to remove'; return; }
+    const { error } = await sb.from('customers').delete().eq('id', b.dataset.cdel);
+    if (error) { toast(niceError(error), 'error'); return; }
+    toast('Customer removed (their past invoices are kept)');
+    await loadAll();
+    customersModal();
+  }));
 }
 
 /* ---------------------------------------------------------------------
