@@ -4,6 +4,7 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 import { CONFIG } from './config.js';
 import { buildInvoicePdf, winAnsiSafe } from './pdf.js';
+import { buildInventoryPdf, buildSalesReportPdf } from './reports.js';
 
 /* ---------------------------------------------------------------------
    Helpers
@@ -54,6 +55,13 @@ const ICONS = {
   card: '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 10h19M6 15h4"/>',
   cash: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 9.5v5M18 9.5v5"/>',
   bank: '<path d="M3 10l9-6 9 6M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>',
+  database: '<ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  upload: '<path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 17v3h16v-3"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  trend: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16"/>',
+  pdf: '<path d="M14 3H6v18h12V7l-4-4z"/><path d="M14 3v4h4"/><path d="M8.5 13h1.5a1.5 1.5 0 0 1 0 3H8.5v-3zm0 3v2M13 13v5h1a2 2 0 0 0 0-5h-1z"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
 };
 const icon = (n) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 
@@ -121,6 +129,8 @@ const state = {
   salesError: null,
   salesFilters: { q: '', status: 'all' },
   pos: null,
+  payments: [],
+  tracker: null,
 };
 const brandOf = (id) => state.brands.find((b) => b.id === id);
 const itemsFor = (bid) => (bid === 'none' ? state.items.filter((i) => !i.brand_id) : state.items.filter((i) => i.brand_id === bid));
@@ -295,7 +305,7 @@ async function loadAll() {
     sb.from('brands').select('*').order('name'),
     sb.from('items').select('*').order('name'),
     sb.from('stock_movements').select('*').gte('created_at', since).order('created_at', { ascending: false }).limit(1000),
-    sb.from('sales').select('*, sale_items(*), sale_payments(*)').order('created_at', { ascending: false }).limit(2000),
+    fetchAll('sales', '*, sale_items(*), sale_payments(*)', 'created_at', false),
     sb.from('customers').select('*').order('name'),
     sb.from('shop_settings').select('*').eq('id', 1).maybeSingle(),
   ]);
@@ -308,6 +318,9 @@ async function loadAll() {
   const salesErr = s.error || c.error || st.error;
   state.salesError = salesErr ? (salesErr.message || String(salesErr)) : null;
   state.sales = s.error ? [] : (s.data || []).map(normalizeSale);
+  // every payment, oldest first: sales are counted when the money is received
+  state.payments = state.sales.flatMap((x) => x.payments.map((p) => ({ ...p, sale: x })))
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   state.customers = c.error ? [] : (c.data || []);
   state.shop = st.data || { shop_name: 'AKASH SHOP C1', footer_note: 'Thanks For Shopping With Us' };
   state.loadedAt = Date.now();
@@ -335,8 +348,11 @@ function bindAppChrome() {
     if (state.user && Date.now() - state.loadedAt > 60000 && !$('#modal').open && !state.pos) await refresh();
   });
 
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+  window.addEventListener('resize', closeMenu);
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
+    if (!el?.dataset.act?.endsWith('-menu')) closeMenu();
     if (!el || !state.user) return;
     const { act, id } = el.dataset;
     const item = id ? state.items.find((i) => i.id === id) : null;
@@ -362,7 +378,23 @@ function bindAppChrome() {
       case 'adjust': if (item) adjustModal(item); break;
       case 'flag': if (item) toggleFlag(item); break;
       case 'delete-item': if (item) deleteItem(item); break;
-      case 'export': exportCSV(); break;
+      case 'export':
+      case 'export-csv': exportCSV(); break;
+      case 'export-pdf': exportInventoryPdf(); break;
+      case 'export-menu': toggleMenu(el, 'export', [
+        { act: 'export-csv', icon: 'table', label: 'Spreadsheet (CSV)', sub: 'Opens in Excel or Google Sheets' },
+        { act: 'export-pdf', icon: 'pdf', label: 'PDF report', sub: 'Printable report of every item' },
+      ]); break;
+      case 'backup-menu': toggleMenu(el, 'backup', [
+        { act: 'backup-create', icon: 'download', label: 'Create backup', sub: lastBackupText() },
+        { act: 'backup-restore', icon: 'history', label: 'Restore a backup', sub: 'Bring everything back from a backup file' },
+      ]); break;
+      case 'backup-create': createBackupNow(); break;
+      case 'backup-restore': restoreModal(); break;
+      case 'cal-prev': case 'cal-next': shiftMonth(act === 'cal-prev' ? -1 : 1); break;
+      case 'cal-day': pickDay(el.dataset.day); break;
+      case 'cal-preset': applyPreset(el.dataset.preset); break;
+      case 'report': downloadSalesReport(); break;
       case 'filter-status':
         state.filters.status = el.dataset.status;
         syncToolbar(); renderTable();
@@ -375,6 +407,7 @@ function bindAppChrome() {
 function currentRoute() {
   if (location.hash === '#/invoices') return { view: 'invoices' };
   if (location.hash === '#/unpaid') return { view: 'unpaid' };
+  if (location.hash === '#/tracker') return { view: 'tracker' };
   const m = location.hash.match(/^#\/brand\/(.+)$/);
   return m ? { view: 'brand', id: decodeURIComponent(m[1]) } : { view: 'dashboard' };
 }
@@ -395,6 +428,7 @@ function render() {
   if (r.view === 'brand') renderBrand(r.id);
   else if (r.view === 'invoices') renderInvoices();
   else if (r.view === 'unpaid') renderUnpaid();
+  else if (r.view === 'tracker') renderTracker();
   else renderDashboard();
 }
 
@@ -405,6 +439,7 @@ function renderTabs() {
   let html = tab('#/dashboard', 'Dashboard', r.view === 'dashboard', icon('grid'));
   html += tab('#/invoices', 'Invoices', r.view === 'invoices', icon('receipt'));
   html += tab('#/unpaid', 'Not Fully Paid', r.view === 'unpaid', icon('wallet'), unpaidSales().length);
+  html += tab('#/tracker', 'Sales Tracker', r.view === 'tracker', icon('trend'));
   html += '<span class="tab-sep" aria-hidden="true"></span>';
   for (const b of state.brands) {
     const s = summarize(itemsFor(b.id));
@@ -1206,17 +1241,22 @@ function salesStats() {
   const today = dayStart().getTime();
   const week = today - 6 * 864e5;
   const m = new Date(); const month = new Date(m.getFullYear(), m.getMonth(), 1).getTime();
-  const r = { today: 0, todayN: 0, week: 0, month: 0, monthN: 0, all: 0, collected: 0, owed: 0, owedN: 0, owing: new Set() };
+  const r = { today: 0, todayN: 0, week: 0, weekN: 0, month: 0, monthN: 0, all: 0, invoiced: 0, owed: 0, owedN: 0, owing: new Set() };
+  // Sales = money actually received, on the day it was received.
+  for (const p of state.payments) {
+    const t = new Date(p.created_at).getTime();
+    r.all += p.amount;
+    if (t >= today) { r.today += p.amount; r.todayN++; }
+    if (t >= week) { r.week += p.amount; r.weekN++; }
+    if (t >= month) { r.month += p.amount; r.monthN++; }
+  }
   for (const s of state.sales) {
-    const t = new Date(s.created_at).getTime();
-    r.all += s.total; r.collected += s.amount_paid;
-    if (t >= today) { r.today += s.total; r.todayN++; }
-    if (t >= week) r.week += s.total;
-    if (t >= month) { r.month += s.total; r.monthN++; }
+    r.invoiced += s.total;
     const o = owed(s);
     if (o > 0) { r.owed += o; r.owedN++; r.owing.add(owerKey(s)); }
   }
   r.owingN = r.owing.size;
+  for (const k of ['today', 'week', 'month', 'all', 'invoiced', 'owed']) r[k] = round2(r[k]);
   return r;
 }
 
@@ -1239,8 +1279,8 @@ function salesStrip() {
       <span class="pos-launch-ico">${icon('cart')}</span>
       <span><strong>Live Sales Counter</strong><small>Start a new sale</small></span>${icon('right')}
     </button>
-    <a class="strip-stat" href="#/invoices"><small>Today's sales</small><strong>${fmtMoney2(st.today)}</strong><span>${st.todayN} invoice${st.todayN === 1 ? '' : 's'}</span></a>
-    <a class="strip-stat" href="#/invoices"><small>This month</small><strong>${fmtMoney2(st.month)}</strong><span>${st.monthN} invoice${st.monthN === 1 ? '' : 's'}</span></a>
+    <a class="strip-stat" href="#/tracker"><small>Today's sales</small><strong>${fmtMoney2(st.today)}</strong><span>${st.todayN} payment${st.todayN === 1 ? '' : 's'} received</span></a>
+    <a class="strip-stat" href="#/tracker"><small>This month</small><strong>${fmtMoney2(st.month)}</strong><span>${st.monthN} payment${st.monthN === 1 ? '' : 's'} received</span></a>
     <a class="strip-stat ${st.owed > 0 ? 'bad' : ''}" href="#/unpaid"><small>Owed to you</small><strong>${fmtMoney2(st.owed)}</strong><span>${st.owingN} customer${st.owingN === 1 ? '' : 's'} · ${st.owedN} invoice${st.owedN === 1 ? '' : 's'}</span></a>
   </section>`;
 }
@@ -1858,16 +1898,16 @@ function renderInvoices() {
   }
   $('#main').innerHTML = head + `
     <section class="kpis kpis-6">
-      ${kpi("Today's sales", fmtMoney2(st.today), 'cart', '', `${st.todayN} invoice${st.todayN === 1 ? '' : 's'}`)}
-      ${kpi('Last 7 days', fmtMoney2(st.week), 'activity')}
-      ${kpi('This month', fmtMoney2(st.month), 'receipt', '', `${st.monthN} invoice${st.monthN === 1 ? '' : 's'}`)}
-      ${kpi('All sales', fmtMoney2(st.all), 'layers', 'navy', `${state.sales.length} invoices`)}
-      ${kpi('Collected', fmtMoney2(st.collected), 'coin', 'ok')}
+      ${kpi("Today's sales", fmtMoney2(st.today), 'cart', '', `${st.todayN} payment${st.todayN === 1 ? '' : 's'} received`)}
+      ${kpi('Last 7 days', fmtMoney2(st.week), 'activity', '', `${st.weekN} payment${st.weekN === 1 ? '' : 's'}`)}
+      ${kpi('This month', fmtMoney2(st.month), 'calendar', '', `${st.monthN} payment${st.monthN === 1 ? '' : 's'}`)}
+      ${kpi('All sales (received)', fmtMoney2(st.all), 'coin', 'ok', `<a href="#/tracker">Open Sales Tracker →</a>`)}
+      ${kpi('Invoiced', fmtMoney2(st.invoiced), 'layers', 'navy', `${state.sales.length} invoice${state.sales.length === 1 ? '' : 's'}`)}
       ${kpi('Still owed', fmtMoney2(st.owed), 'wallet', st.owed > 0 ? 'bad' : 'ok', `<a href="#/unpaid">${st.owedN} not fully paid →</a>`)}
     </section>
     <section class="grid">
       <article class="card span-2">
-        <header class="card-head"><div><h3>Daily sales</h3><p>Last 14 days · collected and still owed</p></div></header>
+        <header class="card-head"><div><h3>Daily sales</h3><p>Money received each day · last 14 days</p></div></header>
         <div class="chart-box"><canvas id="ch-sales"></canvas></div>
       </article>
       <article class="card">
@@ -1927,26 +1967,23 @@ function renderSalesTable() {
 
 function drawSalesCharts() {
   const c = colors(); chartDefaults(c);
-  const days = 14, labels = [], paid = [], due = [], idx = {};
+  const days = 14, labels = [], paid = [], idx = {};
   const start = dayStart(); start.setDate(start.getDate() - (days - 1));
   for (let d = 0; d < days; d++) {
     const dt = new Date(start); dt.setDate(start.getDate() + d);
-    idx[dayKey(dt)] = d; labels.push(dt.toLocaleDateString(CONFIG.LOCALE, { day: 'numeric', month: 'short' })); paid.push(0); due.push(0);
+    idx[dayKey(dt)] = d; labels.push(dt.toLocaleDateString(CONFIG.LOCALE, { day: 'numeric', month: 'short' })); paid.push(0);
   }
-  for (const s of state.sales) {
-    const k = dayKey(new Date(s.created_at));
-    if (k in idx) { paid[idx[k]] = round2(paid[idx[k]] + s.amount_paid); due[idx[k]] = round2(due[idx[k]] + owed(s)); }
+  for (const p of state.payments) {
+    const k = dayKey(new Date(p.created_at));
+    if (k in idx) paid[idx[k]] = round2(paid[idx[k]] + p.amount);
   }
   mkChart('ch-sales', {
     type: 'bar',
-    data: { labels, datasets: [
-      { label: 'Collected', data: paid, backgroundColor: c.ok, borderRadius: 5, maxBarThickness: 22 },
-      { label: 'Still owed', data: due, backgroundColor: c.bad, borderRadius: 5, maxBarThickness: 22 },
-    ] },
+    data: { labels, datasets: [{ label: 'Sales (money received)', data: paid, backgroundColor: c.ok, borderRadius: 5, maxBarThickness: 26 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
-      scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, ticks: { callback: (v) => fmtMoneyShort(v) } } },
-      plugins: { legend: { position: 'top', align: 'end' }, tooltip: { mode: 'index', intersect: false, callbacks: { label: (x) => ` ${x.dataset.label}: ${fmtMoney2(x.raw)}`, footer: (it) => `Sales: ${fmtMoney2(it.reduce((a, x) => a + x.raw, 0))}` } } },
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { callback: (v) => fmtMoneyShort(v) } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (x) => ` Sales: ${fmtMoney2(x.raw)}` } } },
     },
   });
   const by = {};
@@ -2170,6 +2207,522 @@ function customersModal() {
     await loadAll();
     customersModal();
   }));
+}
+
+/* =====================================================================
+   DATA HELPERS — load every row (Supabase returns 1,000 rows per request)
+===================================================================== */
+async function fetchAll(table, cols = '*', order = 'id', ascending = true) {
+  const out = [], size = 1000;
+  for (let from = 0; ; from += size) {
+    let q = sb.from(table).select(cols).order(order, { ascending });
+    if (order !== 'id') q = q.order('id', { ascending });
+    const { data, error } = await q.range(from, from + size - 1);
+    if (error) return { data: null, error };
+    out.push(...(data || []));
+    if (!data || data.length < size) return { data: out, error: null };
+  }
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+const pad2 = (n) => String(n).padStart(2, '0');
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const fromYmd = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const fmtLong = (d) => d.toLocaleDateString(CONFIG.LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const fmtDay = (d) => d.toLocaleDateString(CONFIG.LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
+
+/* =====================================================================
+   TOP-BAR MENUS
+===================================================================== */
+let openMenuEl = null;
+function closeMenu() {
+  if (!openMenuEl) return;
+  openMenuEl.anchor.setAttribute('aria-expanded', 'false');
+  openMenuEl.el.remove();
+  openMenuEl = null;
+}
+function toggleMenu(anchor, name, entries) {
+  const same = openMenuEl?.name === name;
+  closeMenu();
+  if (same) return;
+  const el = document.createElement('div');
+  el.className = 'menu'; el.setAttribute('role', 'menu');
+  el.innerHTML = entries.map((x) => `<button role="menuitem" data-act="${x.act}">${icon(x.icon)}<span><strong>${esc(x.label)}</strong><small>${esc(x.sub)}</small></span></button>`).join('');
+  document.body.append(el);
+  const r = anchor.getBoundingClientRect();
+  el.style.top = `${r.bottom + 8}px`;
+  el.style.left = `${Math.max(8, Math.min(r.right - el.offsetWidth, innerWidth - el.offsetWidth - 8))}px`;
+  anchor.setAttribute('aria-expanded', 'true');
+  openMenuEl = { el, anchor, name };
+  el.querySelector('button')?.focus();
+}
+
+/* =====================================================================
+   INVENTORY PDF EXPORT
+===================================================================== */
+function exportInventoryPdf() {
+  try {
+    const mk = (i) => ({
+      name: i.name, sku: i.sku, category: i.category, notes: i.notes,
+      shop_qty: i.shop_qty, warehouse_qty: i.warehouse_qty, threshold: i.low_stock_threshold,
+      price: i.unit_price, value: value(i), status: statusOf(i), flagged: i.flagged_out_of_stock,
+      shopTxt: fmtNum(i.shop_qty), whTxt: fmtNum(i.warehouse_qty), totalTxt: fmtNum(total(i)),
+    });
+    const group = (name, color, list) => {
+      const items = list.slice().sort((a, b) => a.name.localeCompare(b.name));
+      const units = items.reduce((a, i) => a + total(i), 0);
+      return { name, color: safeColor(color), items: items.map(mk), count: items.length, units, unitsTxt: fmtNum(units), value: items.reduce((a, i) => a + value(i), 0) };
+    };
+    const groups = state.brands.map((b) => group(b.name, b.color, itemsFor(b.id))).filter((g) => g.count);
+    if (itemsFor('none').length) groups.push(group(UNBRANDED.name, UNBRANDED.color, itemsFor('none')));
+    const s = summarize(state.items);
+    const summary = { ...s, brands: state.brands.length, shopTxt: fmtNum(s.shop), whTxt: fmtNum(s.wh), unitsTxt: fmtNum(s.units), shopPct: s.units ? Math.round((s.shop / s.units) * 100) : 0 };
+    const now = new Date();
+    const bytes = buildInventoryPdf({ shop: state.shop || {}, groups, summary, money: pdfMoney, generated: fmtDateTime(now.toISOString()) });
+    downloadBlob(new Blob([bytes], { type: 'application/pdf' }), `AKASH-SHOP-C1-Inventory-${ymd(now)}.pdf`);
+    toast(`Inventory PDF downloaded (${s.count} items)`);
+  } catch (e) {
+    toast('Could not create the PDF: ' + (e.message || e), 'error');
+  }
+}
+
+/* =====================================================================
+   BACKUP & RESTORE  (one .json file holds everything)
+===================================================================== */
+const BACKUP_TABLES = ['brands', 'items', 'customers', 'sales', 'sale_items', 'sale_payments', 'stock_movements', 'shop_settings'];
+const BACKUP_LABELS = { brands: 'Brand tabs', items: 'Items', customers: 'Frequent customers', sales: 'Invoices', sale_items: 'Invoice lines', sale_payments: 'Payments', stock_movements: 'Stock history lines', shop_settings: 'Invoice details' };
+const LAST_BACKUP_KEY = 'c1-last-backup';
+
+function lastBackupText() {
+  let t = null;
+  try { t = localStorage.getItem(LAST_BACKUP_KEY); } catch { /* private mode */ }
+  if (!t) return 'Download a file with everything';
+  return `Last backup on this device: ${timeAgo(t)}`;
+}
+
+async function createBackup(reason = 'manual') {
+  const data = {};
+  for (const t of BACKUP_TABLES) {
+    const { data: rows, error } = await fetchAll(t, '*', 'id', true);
+    if (error) {
+      if (state.salesError && t !== 'brands' && t !== 'items' && t !== 'stock_movements') { data[t] = []; continue; }
+      throw error;
+    }
+    data[t] = rows;
+  }
+  const now = new Date();
+  const file = {
+    app: 'AKASH SHOP C1 Inventory Tracker',
+    format: 'akash-shop-c1-backup',
+    version: 1,
+    created_at: now.toISOString(),
+    created_by: state.user?.email || null,
+    reason,
+    counts: Object.fromEntries(BACKUP_TABLES.map((t) => [t, data[t].length])),
+    data,
+  };
+  const stamp = `${ymd(now)}-${pad2(now.getHours())}${pad2(now.getMinutes())}`;
+  downloadBlob(new Blob([JSON.stringify(file)], { type: 'application/json' }),
+    `AKASH-SHOP-C1-backup-${stamp}${reason === 'before-restore' ? '-before-restore' : ''}.json`);
+  try { localStorage.setItem(LAST_BACKUP_KEY, now.toISOString()); } catch { /* private mode */ }
+  return file;
+}
+
+async function createBackupNow() {
+  toast('Creating backup…');
+  try {
+    const f = await createBackup();
+    toast(`Backup downloaded: ${f.counts.items} items, ${f.counts.sales} invoices. Keep the file somewhere safe.`);
+  } catch (e) {
+    toast('Backup failed: ' + niceError(e), 'error');
+  }
+}
+
+function restoreModal() {
+  let parsed = null;
+  const form = openModal({
+    title: 'Restore a backup',
+    submitLabel: 'Restore backup',
+    danger: true,
+    body: `
+      <p class="confirm-text">Choose a backup file (<b>.json</b>) made with <b>Create backup</b>. Everything in the tracker will be put back exactly as it was in that file.</p>
+      <label class="file-drop" id="file-drop">
+        <input type="file" name="file" accept=".json,application/json" aria-label="Backup file">
+        ${icon('upload')}<strong id="file-name">Choose backup file</strong><small>or drag it here</small>
+      </label>
+      <div id="bk-preview"></div>
+      <label class="check"><input type="checkbox" name="safety" checked><span><strong>Download a backup of the current data first</strong><small>Recommended, so you can undo this if you picked the wrong file.</small></span></label>
+      <label class="check danger-check"><input type="checkbox" name="confirm"><span><strong>I understand that everything now in the tracker will be replaced</strong><small>Logins and staff access are not affected.</small></span></label>`,
+    onSubmit: async (fd) => {
+      if (!parsed) { toast('Choose a backup file first', 'error'); return false; }
+      if (fd.get('confirm') !== 'on') { toast('Tick the box to confirm the restore', 'error'); return false; }
+      if (fd.get('safety') === 'on') {
+        try { await createBackup('before-restore'); } catch (e) { toast('Could not make the safety backup: ' + niceError(e), 'error'); return false; }
+      }
+      const { data, error } = await sb.rpc('restore_backup', { p: parsed });
+      if (error) {
+        const missing = /restore_backup/.test(error.message || '') && /(find|exist)/i.test(error.message || '');
+        toast(missing ? 'Run supabase/backup.sql in Supabase first, then try again.' : niceError(error), 'error');
+        return false;
+      }
+      state.lastRoute = '';
+      await loadAll();
+      if (location.hash !== '#/dashboard') location.hash = '#/dashboard'; else render();
+      toast(`Backup restored: ${data.items} items, ${data.invoices} invoices, ${data.customers} customers`);
+    },
+  });
+  const submit = form.querySelector('[type=submit]');
+  const input = form.elements.namedItem('file');
+  const confirm = form.elements.namedItem('confirm');
+  const sync = () => { submit.disabled = !parsed || !confirm.checked; };
+  confirm.addEventListener('change', sync);
+  sync();
+  const drop = $('#file-drop', form);
+  ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.add('over')));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
+  input.addEventListener('change', async () => {
+    parsed = null; sync();
+    const f = input.files?.[0];
+    const prev = $('#bk-preview', form);
+    if (!f) { prev.innerHTML = ''; return; }
+    $('#file-name', form).textContent = f.name;
+    try {
+      const j = JSON.parse(await f.text());
+      if (j?.format !== 'akash-shop-c1-backup' || !j.data) throw new Error('This file is not an AKASH SHOP C1 backup.');
+      if (Number(j.version) > 1) throw new Error('This backup was made by a newer version of the app.');
+      parsed = j;
+      const now = { brands: state.brands.length, items: state.items.length, customers: state.customers.length, sales: state.sales.length, sale_payments: state.payments.length };
+      const rows = ['brands', 'items', 'sales', 'sale_payments', 'customers', 'stock_movements'].map((t) =>
+        `<li><span>${BACKUP_LABELS[t]}</span><b>${fmtNum((j.data[t] || []).length)}</b>${t in now ? `<small>now ${fmtNum(now[t])}</small>` : '<small></small>'}</li>`).join('');
+      prev.innerHTML = `<div class="bk-card">
+        <div class="bk-head">${icon('database')}<div><strong>Backup from ${esc(fmtDateTime(j.created_at))}</strong><small>${esc(timeAgo(j.created_at))}${j.created_by ? ' · made by ' + esc(j.created_by) : ''}</small></div></div>
+        <ul class="bk-counts">${rows}</ul></div>`;
+    } catch (e) {
+      prev.innerHTML = `<p class="adj-preview error">${esc(e instanceof SyntaxError ? 'This file could not be read. Choose a .json backup made by this app.' : e.message)}</p>`;
+    }
+    sync();
+  });
+}
+
+/* =====================================================================
+   SALES TRACKER
+===================================================================== */
+const isAtSale = (p) => Math.abs(new Date(p.created_at) - new Date(p.sale.created_at)) < 5000;
+const pdfMoneyShort = (n) => { const s = fmtMoneyShort(n); return winAnsiSafe(s) ? s : new Intl.NumberFormat(CONFIG.LOCALE, { notation: 'compact', maximumFractionDigits: 1 }).format(n); };
+
+function trackerDefault() {
+  const today = new Date();
+  return { start: ymd(new Date(today.getFullYear(), today.getMonth(), 1)), end: ymd(today), month: ymd(today).slice(0, 7), picking: false, preset: 'month' };
+}
+
+function salesReportData(s, e) {
+  const start = fromYmd(s), last = fromYmd(e), endEx = addDays(last, 1);
+  const t0 = start.getTime(), t1 = endEx.getTime();
+  const days = Math.max(1, Math.round((t1 - t0) / 864e5));
+  const inRange = (iso) => { const t = new Date(iso).getTime(); return t >= t0 && t < t1; };
+  const pays = state.payments.filter((p) => inRange(p.created_at));
+  const total = round2(pays.reduce((a, p) => a + p.amount, 0));
+  const unit = days === 1 ? 'hour' : days <= 92 ? 'day' : 'month';
+
+  // series
+  let series = [];
+  if (unit === 'hour') {
+    const h = Array(24).fill(0), c = Array(24).fill(0);
+    for (const p of pays) { const x = new Date(p.created_at).getHours(); h[x] += p.amount; c[x]++; }
+    const used = h.map((v, i) => (c[i] ? i : null)).filter((x) => x != null);
+    const from = Math.min(8, ...used), to = Math.max(20, ...used);
+    for (let i = from; i <= to; i++) series.push({ key: i, label: `${pad2(i)}:00`, short: `${pad2(i)}:00`, long: `${pad2(i)}:00–${pad2(i + 1 === 24 ? 0 : i + 1)}:00`, value: round2(h[i]), count: c[i] });
+  } else if (unit === 'day') {
+    const map = {};
+    for (const p of pays) { const k = ymd(new Date(p.created_at)); (map[k] ||= { v: 0, c: 0 }); map[k].v += p.amount; map[k].c++; }
+    for (let d = new Date(start); d < endEx; d = addDays(d, 1)) {
+      const k = ymd(d);
+      series.push({ key: k, label: fmtDay(d), short: d.toLocaleDateString(CONFIG.LOCALE, { day: 'numeric', month: 'short' }), long: fmtDay(d), value: round2(map[k]?.v || 0), count: map[k]?.c || 0 });
+    }
+  } else {
+    const map = {};
+    for (const p of pays) { const dt = new Date(p.created_at); const k = `${dt.getFullYear()}-${dt.getMonth()}`; (map[k] ||= { v: 0, c: 0 }); map[k].v += p.amount; map[k].c++; }
+    for (let d = new Date(start.getFullYear(), start.getMonth(), 1); d < endEx; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+      const k = `${d.getFullYear()}-${d.getMonth()}`;
+      series.push({ key: k, label: d.toLocaleDateString(CONFIG.LOCALE, { month: 'short', year: 'numeric' }), short: d.toLocaleDateString(CONFIG.LOCALE, { month: 'short', year: '2-digit' }), long: d.toLocaleDateString(CONFIG.LOCALE, { month: 'long', year: 'numeric' }), value: round2(map[k]?.v || 0), count: map[k]?.c || 0 });
+    }
+  }
+  let best = null;
+  series.forEach((p) => { if (p.value > 0 && (!best || p.value > best.value)) best = p; });
+  if (best) best.best = true;
+
+  const methods = PAY_METHODS.map(([m]) => {
+    const list = pays.filter((p) => p.method === m);
+    return { name: m, amount: round2(list.reduce((a, p) => a + p.amount, 0)), count: list.length };
+  });
+  const issued = state.sales.filter((x) => inRange(x.created_at));
+  const earlierPays = pays.filter((p) => new Date(p.sale.created_at).getTime() < t0);
+  const items = {};
+  for (const x of issued) for (const l of x.items) {
+    const it = (items[l.item_name] ||= { name: l.item_name, units: 0, value: 0 });
+    it.units += l.qty; it.value = round2(it.value + l.line_total);
+  }
+  const topItems = Object.values(items).sort((a, b) => b.value - a.value || b.units - a.units);
+
+  // statement timeline
+  const events = pays.map((p) => {
+    const x = p.sale, atSale = isAtSale(p), left = round2(x.total - p.amount);
+    return {
+      at: p.created_at, ref: x.invoice_no, method: p.method, amount: p.amount,
+      details: atSale
+        ? `${x.customer_name} · Sale · ${unitsOf(x)} unit${unitsOf(x) === 1 ? '' : 's'}${left > 0 ? ` · ${pdfMoney(left)} on credit` : ''}`
+        : `${x.customer_name} · Payment towards ${x.invoice_no} (${fmtDate(x.created_at)})`,
+    };
+  });
+  for (const x of issued) {
+    if (!x.payments.some((p) => isAtSale({ ...p, sale: x }))) {
+      events.push({ at: x.created_at, ref: x.invoice_no, method: null, amount: null, details: `${x.customer_name} · Sale on credit · ${unitsOf(x)} unit${unitsOf(x) === 1 ? '' : 's'} · ${pdfMoney(x.total)} owed` });
+    }
+  }
+  events.sort((a, b) => new Date(a.at) - new Date(b.at));
+  const dayMap = new Map();
+  for (const ev of events) {
+    const d = new Date(ev.at), k = ymd(d);
+    if (!dayMap.has(k)) dayMap.set(k, { label: fmtLong(d), total: 0, rows: [] });
+    const g = dayMap.get(k);
+    g.rows.push({ ...ev, time: fmtTime(ev.at) });
+    if (ev.amount != null) g.total = round2(g.total + ev.amount);
+  }
+
+  const label = days === 1 ? start.toLocaleDateString(CONFIG.LOCALE, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+    : `${fmtDate(start)} – ${fmtDate(last)}`;
+  return {
+    start, last, days, unit, total, count: pays.length, pays, series, best,
+    bestTitle: unit === 'hour' ? 'BUSIEST HOUR' : unit === 'month' ? 'BEST MONTH' : 'BEST DAY',
+    bestText: best ? (unit === 'hour' ? best.long : best.long) : '—',
+    avgPerDay: round2(total / days), methods,
+    issuedCount: issued.length, issuedValue: round2(issued.reduce((a, x) => a + x.total, 0)),
+    units: issued.reduce((a, x) => a + unitsOf(x), 0), lineCount: issued.reduce((a, x) => a + x.items.length, 0),
+    earlier: round2(earlierPays.reduce((a, p) => a + p.amount, 0)), earlierCount: earlierPays.length,
+    stillOwed: round2(issued.reduce((a, x) => a + owed(x), 0)),
+    topItems, timeline: [...dayMap.values()], creditRows: events.some((ev) => ev.amount == null) || pays.some((p) => isAtSale(p) && p.sale.total - p.amount > 0.004),
+    label, rangeText: days === 1 ? fmtLong(start) : `${days} days · ${fmtDate(start)} – ${fmtDate(last)}`,
+  };
+}
+
+function downloadSalesReport() {
+  const t = state.tracker || (state.tracker = trackerDefault());
+  try {
+    const r = salesReportData(t.start, t.end);
+    const data = { ...r, shop: state.shop || {}, money: pdfMoney, moneyShort: pdfMoneyShort, generated: fmtDateTime(new Date().toISOString()),
+      best: r.best ? { label: r.best.label, amount: r.best.value } : null };
+    const bytes = buildSalesReportPdf(data);
+    downloadBlob(new Blob([bytes], { type: 'application/pdf' }), `AKASH-SHOP-C1-Sales-Report-${t.start}${t.start !== t.end ? '-to-' + t.end : ''}.pdf`);
+    toast(`Sales report downloaded · ${r.label}`);
+  } catch (e) {
+    toast('Could not create the report: ' + (e.message || e), 'error');
+  }
+}
+
+/* ----- calendar ----- */
+function shiftMonth(n) {
+  const t = state.tracker;
+  const [y, m] = t.month.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  t.month = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  renderTracker();
+}
+function pickDay(day) {
+  const t = state.tracker;
+  if (!t.picking) { t.start = t.end = day; t.picking = true; }
+  else {
+    if (day < t.start) { t.end = t.start; t.start = day; } else t.end = day;
+    t.picking = false;
+  }
+  t.preset = null;
+  renderTracker();
+}
+const PRESETS = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['month', 'This month'], ['lastmonth', 'Last month'], ['year', 'This year'], ['all', 'All time']];
+function applyPreset(k) {
+  const t = state.tracker, today = dayStart();
+  let a = today, b = today;
+  if (k === 'yesterday') a = b = addDays(today, -1);
+  if (k === '7d') a = addDays(today, -6);
+  if (k === '30d') a = addDays(today, -29);
+  if (k === 'month') a = new Date(today.getFullYear(), today.getMonth(), 1);
+  if (k === 'lastmonth') { a = new Date(today.getFullYear(), today.getMonth() - 1, 1); b = new Date(today.getFullYear(), today.getMonth(), 0); }
+  if (k === 'year') a = new Date(today.getFullYear(), 0, 1);
+  if (k === 'all') { const first = state.payments[0] || state.sales[state.sales.length - 1]; a = first ? dayStart(new Date(first.created_at)) : today; }
+  t.start = ymd(a); t.end = ymd(b); t.month = t.end.slice(0, 7); t.picking = false; t.preset = k;
+  renderTracker();
+}
+
+function calendarHtml(t) {
+  const [y, m] = t.month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const lead = (first.getDay() + 6) % 7; // Monday first
+  const gridStart = addDays(first, -lead);
+  const today = ymd(new Date());
+  const totals = {};
+  for (const p of state.payments) { const k = ymd(new Date(p.created_at)); totals[k] = (totals[k] || 0) + p.amount; }
+  const monthMax = Math.max(0, ...Object.entries(totals).filter(([k]) => k.startsWith(t.month)).map(([, v]) => v));
+  const wk = [];
+  for (let i = 0; i < 7; i++) wk.push(addDays(new Date(2024, 0, 1), i).toLocaleDateString(CONFIG.LOCALE, { weekday: 'narrow' }));
+  let cells = '';
+  for (let i = 0; i < 42; i++) {
+    const d = addDays(gridStart, i), k = ymd(d);
+    if (i >= 35 && d.getMonth() !== m - 1) break;
+    const v = totals[k] || 0;
+    const lv = !v ? 0 : monthMax ? Math.min(4, Math.ceil((v / monthMax) * 4)) : 1;
+    const cls = ['cal-day', `lv${lv}`];
+    if (d.getMonth() !== m - 1) cls.push('other');
+    if (k === today) cls.push('today');
+    if (k >= t.start && k <= t.end) cls.push('in');
+    if (k === t.start) cls.push('first');
+    if (k === t.end) cls.push('last');
+    const future = k > today;
+    cells += `<button class="${cls.join(' ')}" data-act="cal-day" data-day="${k}" ${future ? 'disabled' : ''} title="${esc(fmtLong(d))}${v ? ' · ' + esc(fmtMoney2(v)) : ''}">
+      <span>${d.getDate()}</span>${v ? '<i></i>' : ''}</button>`;
+  }
+  return `<div class="cal">
+    <div class="cal-head">
+      <button class="icon-btn" data-act="cal-prev" aria-label="Previous month">${icon('left')}</button>
+      <strong>${first.toLocaleDateString(CONFIG.LOCALE, { month: 'long', year: 'numeric' })}</strong>
+      <button class="icon-btn" data-act="cal-next" aria-label="Next month">${icon('right')}</button>
+    </div>
+    <div class="cal-grid">${wk.map((w) => `<span class="cal-wk">${w}</span>`).join('')}${cells}</div>
+    <div class="cal-legend"><span>Less</span><i class="lv0"></i><i class="lv1"></i><i class="lv2"></i><i class="lv3"></i><i class="lv4"></i><span>More sales</span></div>
+  </div>`;
+}
+
+function renderTracker() {
+  destroyCharts();
+  state.scope = null;
+  const t = state.tracker || (state.tracker = trackerDefault());
+  const head = `<section class="page-head">
+    <div><p class="eyebrow">Sales</p><h1>Sales Tracker</h1></div>
+    <div class="head-actions"><button class="btn btn-accent" data-act="report">${icon('pdf')}Generate Sales Report</button></div></section>`;
+  if (state.salesError) { $('#main').innerHTML = head + salesSetupNotice(); return; }
+  const r = salesReportData(t.start, t.end);
+  const recent = r.pays.slice(-8).reverse();
+  const pct = (a) => (r.total ? Math.round((a / r.total) * 100) : 0);
+  const mColor = { Cash: 'var(--ok)', Card: 'var(--sky)', 'Bank transfer': '#8b5cf6' };
+
+  $('#main').innerHTML = head + `
+    <section class="tracker-top">
+      <article class="card cal-card">
+        <div class="chips presets">${PRESETS.map(([k, l]) => `<button class="chip ${t.preset === k ? 'on' : ''}" data-act="cal-preset" data-preset="${k}">${l}</button>`).join('')}</div>
+        ${calendarHtml(t)}
+        <div class="cal-sel">
+          <div><small>${t.picking ? 'Start day chosen. Now tap the last day' : 'Selected'}</small><strong>${esc(r.label)}</strong><span class="muted">${r.days} day${r.days === 1 ? '' : 's'}</span></div>
+          <button class="btn btn-primary" data-act="report">${icon('download')}Generate Sales Report</button>
+        </div>
+      </article>
+      <div class="tracker-side">
+        <article class="tk-hero">
+          <small>${r.days === 1 ? 'Sales on this day' : 'Total sales in this period'}</small>
+          <strong class="tk-total" data-count="${r.total}">${fmtMoney2(r.total)}</strong>
+          <span>Money received · ${esc(r.rangeText)}</span>
+          <div class="tk-mini">
+            <div><small>Transactions</small><b>${fmtNum(r.count)}</b></div>
+            <div><small>${r.days === 1 ? 'Average sale' : 'Average per day'}</small><b>${fmtMoney2(r.days === 1 ? (r.count ? r.total / r.count : 0) : r.avgPerDay)}</b></div>
+            <div><small>${r.unit === 'hour' ? 'Busiest hour' : r.unit === 'month' ? 'Best month' : 'Best day'}</small><b>${r.best ? esc(r.best.label) : '—'}</b>${r.best ? `<em>${fmtMoney2(r.best.value)}</em>` : ''}</div>
+          </div>
+        </article>
+        <section class="kpis tk-kpis">
+          ${kpi('Invoices issued', fmtNum(r.issuedCount), 'receipt', '', `${fmtMoney2(r.issuedValue)} invoiced`)}
+          ${kpi('Units sold', fmtNum(r.units), 'box', '', `${r.lineCount} item line${r.lineCount === 1 ? '' : 's'}`)}
+          ${kpi('From earlier invoices', fmtMoney2(r.earlier), 'history', 'ok', `${r.earlierCount} payment${r.earlierCount === 1 ? '' : 's'} on old balances`)}
+          ${kpi('Still owed', fmtMoney2(r.stillOwed), 'wallet', r.stillOwed > 0 ? 'bad' : 'ok', 'On invoices from this period')}
+        </section>
+      </div>
+    </section>
+    <article class="card">
+      <header class="card-head"><div><h3>Sales over time</h3><p>Money received ${r.unit === 'hour' ? 'each hour' : r.unit === 'month' ? 'each month' : 'each day'} · ${esc(r.label)}</p></div>
+        <span class="count">${fmtMoney2(r.total)}</span></header>
+      <div class="chart-box tk-chart"><canvas id="ch-tracker"></canvas></div>
+    </article>
+    <section class="grid">
+      <article class="card">
+        <header class="card-head"><div><h3>How customers paid</h3><p>${r.count} payment${r.count === 1 ? '' : 's'}</p></div></header>
+        <ul class="mbars">${r.methods.map((m) => `<li><div><strong>${m.name}</strong><span>${fmtMoney2(m.amount)} · ${pct(m.amount)}%</span></div>
+          <div class="mbar"><i style="width:${pct(m.amount)}%;background:${mColor[m.name]}"></i></div><small>${m.count} payment${m.count === 1 ? '' : 's'}</small></li>`).join('')}</ul>
+      </article>
+      <article class="card">
+        <header class="card-head"><div><h3>Best sellers</h3><p>From invoices in this period</p></div></header>
+        ${r.topItems.length ? `<ol class="best">${r.topItems.slice(0, 6).map((x) => `<li><span class="b-name">${esc(x.name)}</span><span class="b-u">${fmtNum(x.units)} units</span><b>${fmtMoney2(x.value)}</b></li>`).join('')}</ol>`
+          : `<div class="empty-mini">${icon('box')}<span>No items sold in this period</span></div>`}
+      </article>
+      <article class="card">
+        <header class="card-head"><div><h3>Latest money in</h3><p>Full statement is in the PDF report</p></div></header>
+        ${recent.length ? `<ul class="feed">${recent.map((p) => `<li><span class="feed-chip in">+${fmtMoney2(p.amount)}</span>
+          <div><strong>${esc(p.sale.customer_name)}</strong><small>${esc(p.sale.invoice_no)} · ${esc(p.method)}${isAtSale(p) ? '' : ' · later payment'}</small></div>
+          <time datetime="${esc(p.created_at)}">${r.days === 1 ? fmtTime(p.created_at) : fmtDate(p.created_at)}</time></li>`).join('')}</ul>`
+          : `<div class="empty-mini">${icon('activity')}<span>No money received in this period</span></div>`}
+      </article>
+    </section>
+    <p class="tk-note">${icon('alert')}Sales are counted on the day the money is received. A sale on credit counts only when the customer pays.</p>`;
+
+  drawTracker(r);
+  countUp($('.tk-total'), r.total);
+}
+
+function countUp(el, target) {
+  if (!el || matchMedia('(prefers-reduced-motion: reduce)').matches || !(target > 0)) return;
+  const t0 = performance.now(), dur = 900;
+  const step = (now) => {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+    el.textContent = fmtMoney2(target * e);
+    if (k < 1 && el.isConnected) requestAnimationFrame(step); else el.textContent = fmtMoney2(target);
+  };
+  requestAnimationFrame(step);
+}
+
+function drawTracker(r) {
+  const c = colors(); chartDefaults(c);
+  const n = r.series.length;
+  const delayEach = Math.min(60, 900 / Math.max(n, 1));
+  const animation = { duration: 900, easing: 'easeOutQuart', delay: (ctx) => (ctx.type === 'data' && ctx.mode === 'default' ? Math.round(ctx.dataIndex * delayEach) : 0) };
+  const bars = r.unit === 'hour' || n <= 3;
+  const tooltip = { callbacks: {
+    title: (it) => r.series[it[0].dataIndex].long,
+    label: (x) => ` Sales: ${fmtMoney2(x.raw)}`,
+    footer: (it) => { const k = r.series[it[0].dataIndex].count; return `${k} payment${k === 1 ? '' : 's'}`; },
+  } };
+  const scales = {
+    x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+    y: { beginAtZero: true, ticks: { callback: (v) => fmtMoneyShort(v) }, title: { display: true, text: 'Amount' } },
+  };
+  if (bars) {
+    mkChart('ch-tracker', {
+      type: 'bar',
+      data: { labels: r.series.map((p) => p.label), datasets: [{ label: 'Sales', data: r.series.map((p) => p.value),
+        backgroundColor: r.series.map((p) => (p.best ? '#f59e0b' : c.sky)), borderRadius: 6, maxBarThickness: 34 }] },
+      options: { responsive: true, maintainAspectRatio: false, animation, scales, plugins: { legend: { display: false }, tooltip } },
+    });
+    return;
+  }
+  mkChart('ch-tracker', {
+    type: 'line',
+    data: { labels: r.series.map((p) => p.label), datasets: [{
+      label: 'Sales', data: r.series.map((p) => p.value), fill: true, tension: 0.35, borderWidth: 3, borderColor: c.sky,
+      backgroundColor: (ctx) => {
+        const { chart } = ctx; const area = chart.chartArea;
+        if (!area) return 'rgba(11,132,214,.12)';
+        const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+        g.addColorStop(0, 'rgba(11,132,214,.35)'); g.addColorStop(1, 'rgba(11,132,214,0)');
+        return g;
+      },
+      pointRadius: r.series.map((p) => (p.best ? 6 : n > 45 ? 0 : 3)),
+      pointHoverRadius: 7,
+      pointBackgroundColor: r.series.map((p) => (p.best ? '#f59e0b' : c.surface)),
+      pointBorderColor: r.series.map((p) => (p.best ? '#f59e0b' : c.sky)),
+      pointBorderWidth: 2,
+    }] },
+    options: { responsive: true, maintainAspectRatio: false, animation, interaction: { mode: 'index', intersect: false }, scales, plugins: { legend: { display: false }, tooltip } },
+  });
 }
 
 /* ---------------------------------------------------------------------

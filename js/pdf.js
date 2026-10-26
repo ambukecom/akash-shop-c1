@@ -46,7 +46,7 @@ const esc = (s) => s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g,
 const f = (n) => +n.toFixed(2);
 
 /* ---------- tiny PDF canvas (top-left origin, points) ---------- */
-class Doc {
+export class Doc {
   constructor(w = 595.28, h = 841.89) { this.W = w; this.H = h; this.pages = []; }
   page() { this.ops = []; this.pages.push(this.ops); return this; }
   y(v) { return f(this.H - v); }
@@ -131,7 +131,7 @@ class Doc {
 }
 
 /* ---------- invoice layout ---------- */
-const C = {
+export const C = {
   navy: '#0a1a33', navy2: '#0f2f57', sky: '#0b84d6', saffron: '#f59e0b', ink: '#0f1b2d', muted: '#5c6b80', faint: '#8a97a9',
   line: '#e2e8f0', soft: '#f3f6fa', zebra: '#f8fafc', ok: '#16a34a', okSoft: '#e7f6ec', warn: '#d97706', warnSoft: '#fff3df', bad: '#dc2626', badSoft: '#fdeaea',
 };

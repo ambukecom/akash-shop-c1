@@ -42,6 +42,15 @@ A password-protected inventory website for the shop. It runs as a static site fr
 - **Not Fully Paid tab** – everything still owed: total outstanding, who owes the most, oldest balance, tap-to-call numbers, and **Record payment** for money paid later. Once fully paid, the invoice leaves this tab, and its PDF shows the payment history.
 - **Invoice details** (Invoices tab) sets the shop address, phone, email and bottom message printed on invoices. **Frequent customers** lets you add or remove saved customers.
 
+
+### Backup, export and Sales Tracker
+
+- **Backup** (top bar) → **Create backup** downloads one `.json` file containing everything: brand tabs, items, stock history, invoices, payments, frequent customers and invoice details. Keep these files somewhere safe (Google Drive, email to yourself, a USB stick).
+- **Backup → Restore a backup**: choose a backup file, check the preview (date and counts), tick the confirm box. The tracker is put back exactly as it was in that file, with the same IDs, invoice numbers, dates and balances. A safety backup of the current data downloads first. The restore happens in one step: if the file is damaged, nothing changes. Logins are never affected.
+- **Export** (top bar) → **Spreadsheet (CSV)** or **PDF report**. The PDF lists every item grouped by brand with all columns (shop, warehouse, total, alert level, price, value, status) plus summary figures.
+- **Sales are counted when money is received.** An invoice that isn't fully paid only adds to sales on the day(s) the customer actually pays.
+- **Sales Tracker** tab: animated sales graph (amount by date), a calendar to pick one day or a range (or presets like *This month*), the totals for that period, and **Generate Sales Report**. That downloads a PDF with a one-page summary followed by a bank-statement-style list of every sale in date order, with a running balance.
+
 ## Files
 
 ```
@@ -50,8 +59,10 @@ css/styles.css        the look
 js/config.js          ← your settings (Supabase keys, currency)
 js/app.js             the app
 js/pdf.js             builds the PDF invoices
+js/reports.js         builds the inventory and sales report PDFs
 supabase/schema.sql   database setup, run once in Supabase
 supabase/sales.sql    sales/invoices setup, run once in Supabase
+supabase/backup.sql   backup/restore setup, run once in Supabase
 ```
 
 ## Setup (about 20 minutes)
@@ -63,7 +74,7 @@ Supabase occasionally renames menu items. If a label below doesn't match exactly
 1. Sign up at **supabase.com** → **New project**. Pick a region near the shop and save the database password somewhere safe.
 2. Open **SQL Editor** → **New query**. Paste in the whole of `supabase/schema.sql` and click **Run**. It should finish with "Success".
 
-   Then open another **New query**, paste in the whole of `supabase/sales.sql` and click **Run**.
+   Then do the same with `supabase/sales.sql`, and then `supabase/backup.sql` (each in a new query).
 
 ### 2. Lock down sign-ups and create the shopkeeper's login
 
@@ -97,7 +108,7 @@ Done. Open the site, sign in, create the first brand tab, and add items.
 
 - **The code is visible, the data is not.** GitHub Pages sites are public, so anyone with the link can load the sign-in page and read the HTML/JS. They contain no stock data and no secrets. If you'd rather keep the code private too, a private repo works with GitHub Pages on paid GitHub plans, or free on Netlify, Vercel or Cloudflare Pages.
 - **Supabase free plan:** a project that has no activity for 7 days is paused. Restore it with one click in the Supabase dashboard. Daily use keeps it awake.
-- **Backups:** use **Export** in the app regularly. Supabase paid plans add automatic backups.
+- **Backups:** use **Backup → Create backup** regularly (for example weekly) and keep the files safe. Supabase paid plans add automatic backups too.
 - **Two people editing at once:** the page refreshes its data when you return to the tab, and the **Refresh** button reloads instantly. Stock adjustments are applied safely in the database, so simultaneous changes never overwrite each other.
 - **Large catalogues:** the app loads up to 1,000 items in one go, which is plenty for one shop. Beyond that, ask for pagination to be added.
 
