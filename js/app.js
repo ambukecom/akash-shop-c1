@@ -264,11 +264,13 @@ async function enterApp(session) {
   $('#app-view').hidden = false;
   $('#main').innerHTML = '<div class="boot" style="min-height:40vh"><div class="spinner"></div></div>';
   if (!/^#\//.test(location.hash)) history.replaceState(null, '', location.pathname + '#/dashboard');
-  if (await loadAll()) render();
+  if (await loadAll()) { render(); startAssistant(); }
 }
 
 function teardown() {
   state.user = null;
+  try { assistant?.destroy(); } catch { /* ignore */ }
+  assistant = null;
   state.brands = []; state.items = []; state.movements = [];
   state.sales = []; state.customers = []; state.shop = {};
   state.lastRoute = '';
@@ -324,6 +326,7 @@ async function loadAll() {
   state.customers = c.error ? [] : (c.data || []);
   state.shop = st.data || { shop_name: 'AKASH SHOP C1', footer_note: 'Thanks For Shopping With Us' };
   state.loadedAt = Date.now();
+  state.dataStamp = (state.dataStamp || 0) + 1;
   return true;
 }
 async function refresh() { if (await loadAll()) render(); }
@@ -359,6 +362,7 @@ function bindAppChrome() {
     const sale = id ? saleById(id) : null;
     switch (act) {
       case 'pos-open': openPOS(); break;
+      case 'ai-open': assistant?.open(); break;
       case 'inv-pdf': if (sale) downloadInvoice(sale); break;
       case 'inv-share': if (sale) shareInvoice(sale); break;
       case 'inv-view': if (sale) saleModal(sale); break;
@@ -1372,6 +1376,7 @@ function openPOS() {
   }
   el.hidden = false;
   document.body.classList.add('pos-open');
+  assistant?.posChanged();
   renderPOS();
   // warm up the voice list (some browsers load voices lazily)
   try { speechSynthesis?.getVoices(); } catch { /* ignore */ }
@@ -1385,6 +1390,7 @@ function closePOS(force = false) {
     state.pos = null;
     el.hidden = true; el.innerHTML = '';
     document.body.classList.remove('pos-open');
+    assistant?.posChanged();
     try { speechSynthesis?.cancel(); } catch { /* ignore */ }
     if (state.user && !force) render();
   };
@@ -1407,6 +1413,7 @@ function renderPOS() {
       <div class="pos-title"><span class="mark">C1</span><div><strong>Live Sales Counter</strong><small>${esc(state.shop.shop_name || 'AKASH SHOP C1')}</small></div></div>
       <ol class="pos-steps">${steps.map(([, l], i) => `<li class="${i < idx ? 'done' : i === idx ? 'on' : ''}"><span>${i < idx ? icon('check') : i + 1}</span>${l}</li>`).join('')}</ol>
       <div class="pos-head-act">
+        ${assistant ? `<button class="pos-icon pos-ai" data-pos="ai" title="Talk to the AI Shop Assistant"><span class="ai-mini-orb"></span><span class="hide-sm">AI Assistant</span></button>` : ''}
         <button class="pos-icon" data-pos="mute" title="${isMuted() ? 'Turn voice on' : 'Mute voice'}" aria-pressed="${isMuted()}">${icon(isMuted() ? 'mute' : 'volume')}<span class="hide-sm">${isMuted() ? 'Muted' : 'Voice on'}</span></button>
         <button class="pos-icon" data-pos="close" title="Close counter" aria-label="Close">${icon('x')}</button>
       </div>
@@ -1700,9 +1707,9 @@ const customerLabel = () => {
 
 async function recordSale() {
   const p = state.pos, total = posTotal(), paid = paidNow();
-  if (paid < 0 || paid > total) { toast('Check the payment amount', 'error'); return; }
+  if (paid < 0 || paid > total) { toast('Check the payment amount', 'error'); return { error: 'Check the payment amount' }; }
   const btn = $('#pos-record');
-  p.busy = true; btn.disabled = true; btn.classList.add('loading');
+  p.busy = true; if (btn) { btn.disabled = true; btn.classList.add('loading'); }
   const c = p.customer;
   const { data, error } = await sb.rpc('record_sale', {
     p_lines: p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: round2(l.unit_price) })),
@@ -1710,14 +1717,16 @@ async function recordSale() {
     p_paid: paid,
     p_method: p.pay.method,
   });
-  p.busy = false; btn.classList.remove('loading'); btn.disabled = false;
-  if (error) { toast(niceError(error), 'error'); return; }
+  p.busy = false; if (btn) { btn.classList.remove('loading'); btn.disabled = false; }
+  if (error) { toast(niceError(error), 'error'); return { error: niceError(error) }; }
   await loadAll();
   const sale = saleById(data.id) || normalizeSale({ ...data, sale_items: [], sale_payments: [] });
+  if (!state.pos) return { sale };
   p.sale = sale;
   p.step = 'done';
   renderPOS();
   downloadInvoice(sale);
+  return { sale };
 }
 
 /* ---------- step 4: done ---------- */
@@ -1754,6 +1763,7 @@ function posClick(e) {
   const p = state.pos, id = el.dataset.id;
   switch (el.dataset.pos) {
     case 'close': closePOS(); break;
+    case 'ai': assistant?.open(); break;
     case 'mute': setMuted(!isMuted()); if (isMuted()) try { speechSynthesis.cancel(); } catch { /* */ }
       el.outerHTML = `<button class="pos-icon" data-pos="mute" title="${isMuted() ? 'Turn voice on' : 'Mute voice'}" aria-pressed="${isMuted()}">${icon(isMuted() ? 'mute' : 'volume')}<span class="hide-sm">${isMuted() ? 'Muted' : 'Voice on'}</span></button>`;
       break;
@@ -2512,8 +2522,8 @@ function salesReportData(s, e) {
   };
 }
 
-function downloadSalesReport() {
-  const t = state.tracker || (state.tracker = trackerDefault());
+function downloadSalesReport(start, end) {
+  const t = start ? { start, end: end || start } : (state.tracker || (state.tracker = trackerDefault()));
   try {
     const r = salesReportData(t.start, t.end);
     const data = { ...r, shop: state.shop || {}, money: pdfMoney, moneyShort: pdfMoneyShort, generated: fmtDateTime(new Date().toISOString()),
@@ -2521,8 +2531,10 @@ function downloadSalesReport() {
     const bytes = buildSalesReportPdf(data);
     downloadBlob(new Blob([bytes], { type: 'application/pdf' }), `AKASH-SHOP-C1-Sales-Report-${t.start}${t.start !== t.end ? '-to-' + t.end : ''}.pdf`);
     toast(`Sales report downloaded · ${r.label}`);
+    return { total: r.total, count: r.count };
   } catch (e) {
     toast('Could not create the report: ' + (e.message || e), 'error');
+    return { total: 0, count: 0 };
   }
 }
 
@@ -2723,6 +2735,155 @@ function drawTracker(r) {
     }] },
     options: { responsive: true, maintainAspectRatio: false, animation, interaction: { mode: 'index', intersect: false }, scales, plugins: { legend: { display: false }, tooltip } },
   });
+}
+
+/* =====================================================================
+   AI SHOP ASSISTANT (built in — runs on this device)
+   The assistant gets a small, safe set of things it may read and do.
+===================================================================== */
+let assistant = null;
+const AI_MEMORY_KEY = 'c1-ai-memory';
+const aiMemory = (() => {
+  let data = {};
+  try { data = JSON.parse(localStorage.getItem(AI_MEMORY_KEY) || '{}') || {}; } catch { data = {}; }
+  let cloud = null;      // null = unknown, false = table not set up, true = syncing
+  let timer = null;
+  const pushCloud = () => {
+    if (!cloud || !sb) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => { sb.from('assistant_memory').upsert({ id: 1, data, updated_at: new Date().toISOString() }).then(({ error }) => { if (error) cloud = false; }); }, 1500);
+  };
+  return {
+    get: (k) => data[k],
+    set: (k, v) => { data[k] = v; try { localStorage.setItem(AI_MEMORY_KEY, JSON.stringify(data)); } catch { /* full */ } pushCloud(); },
+    async sync() {
+      if (!sb) return;
+      const { data: row, error } = await sb.from('assistant_memory').select('data').eq('id', 1).maybeSingle();
+      if (error) { cloud = false; return; }
+      cloud = true;
+      const remote = row?.data || {};
+      // merge: phrases learnt on any device are kept
+      data = { ...remote, ...data, aliases: { ...(remote.aliases || {}), ...(data.aliases || {}) } };
+      try { localStorage.setItem(AI_MEMORY_KEY, JSON.stringify(data)); } catch { /* */ }
+      pushCloud();
+    },
+  };
+})();
+
+const posApi = {
+  isOpen: () => !!state.pos,
+  step: () => state.pos?.step || null,
+  open() {
+    if (state.salesError) return 'sales';
+    if (!state.items.some(sellable)) return 'stock';
+    if (!state.pos) openPOS();
+    return !!state.pos;
+  },
+  lines: () => (state.pos ? state.pos.lines.map((l) => ({ ...l })) : []),
+  total: () => (state.pos ? posTotal() : 0),
+  avail: (it) => { const i = posItem(it.id) || it; return state.pos ? availFor(i) : (sellable(i) ? i.shop_qty : 0); },
+  refreshItems() {
+    const p = state.pos;
+    if (!p) return;
+    if (p.step !== 'items') { p.step = 'items'; renderPOS(); return; }
+    renderSheet(); renderGrid(); renderQty();
+  },
+  add(id, qty, price) {
+    const p = state.pos, it = posItem(id);
+    if (!p || !it) return;
+    const line = p.lines.find((l) => l.item_id === id);
+    if (line) { line.qty += qty; if (price != null) line.unit_price = round2(price); }
+    else p.lines.push({ item_id: it.id, name: it.name, sku: it.sku, qty, unit_price: price != null ? round2(price) : Number(it.unit_price) || 0 });
+    p.flash = id;
+    posApi.refreshItems();
+  },
+  setQty(id, qty) {
+    const p = state.pos, l = p?.lines.find((x) => x.item_id === id);
+    if (!l) return 0;
+    setLineQty(id, qty);
+    posApi.refreshItems();
+    return l.qty;
+  },
+  setPrice(id, price) {
+    const l = state.pos?.lines.find((x) => x.item_id === id);
+    if (!l) return;
+    l.unit_price = round2(price);
+    posApi.refreshItems();
+  },
+  remove(id) { if (!state.pos) return; state.pos.lines = state.pos.lines.filter((x) => x.item_id !== id); posApi.refreshItems(); },
+  clear() { if (!state.pos) return; state.pos.lines = []; posApi.refreshItems(); },
+  toItems() { if (!state.pos) return; state.pos.step = 'items'; renderPOS(); },
+  toCustomer() { if (!state.pos || !state.pos.lines.length) return; state.pos.step = 'customer'; renderPOS(); },
+  setCustomer(c) {
+    const p = state.pos;
+    if (!p) return;
+    p.customer = { mode: c.mode, id: c.id || '', name: c.name || '', address: c.address || '', phone: c.phone || '', save: c.mode === 'new' };
+    p.step = 'customer'; renderPOS();
+  },
+  setPayment(pay) {
+    const p = state.pos;
+    if (!p) return;
+    const total = posTotal();
+    const full = pay.amount >= total;
+    p.pay = { full, amount: full ? '' : String(round2(pay.amount)), method: pay.method || 'Cash' };
+    p.step = 'payment'; renderPOS();
+  },
+  async record() {
+    const p = state.pos;
+    if (!p) return { error: 'The sales counter is closed.' };
+    if (p.step !== 'payment') { p.step = 'payment'; renderPOS(); }
+    return recordSale();
+  },
+  newSale() { if (!state.pos) openPOS(); else { state.pos = freshPOS(); renderPOS(); } },
+  close() { closePOS(); },
+};
+
+function aiContext() {
+  return {
+    data: () => ({
+      items: state.items, brands: state.brands, customers: state.customers, sales: state.sales, payments: state.payments,
+      movements: state.movements, shop: state.shop, salesReady: !state.salesError, stamp: state.dataStamp,
+    }),
+    settings: () => ({ currency: CONFIG.CURRENCY, locale: CONFIG.LOCALE, shopName: state.shop?.shop_name || 'AKASH SHOP C1' }),
+    memory: aiMemory,
+    pos: posApi,
+    act: {
+      async adjustStock(itemId, location, change, reason) {
+        const { error } = await sb.rpc('adjust_stock', { p_item: itemId, p_location: location, p_change: change, p_reason: reason });
+        return error ? { error: niceError(error) } : {};
+      },
+      async transferStock(itemId, qty, direction) {
+        const { error } = await sb.rpc('transfer_stock', { p_item: itemId, p_qty: qty, p_direction: direction });
+        return error ? { error: niceError(error) } : {};
+      },
+      async addPayment(saleId, amount, method, note) {
+        const { error } = await sb.rpc('add_payment', { p_sale: saleId, p_amount: amount, p_method: method, p_note: note || null });
+        return error ? { error: niceError(error) } : {};
+      },
+      async flag(itemId, on) {
+        const { error } = await sb.from('items').update({ flagged_out_of_stock: on }).eq('id', itemId);
+        return error ? { error: niceError(error) } : {};
+      },
+      async refresh() { if (await loadAll()) { if (!state.pos) render(); else if (state.pos.step === 'items') { renderGrid(); renderQty(); } } },
+      go: (hash) => { if (state.pos && !state.pos.lines.length) closePOS(true); go(hash); },
+      report: (s, e) => downloadSalesReport(s, e),
+      inventoryPdf: () => exportInventoryPdf(),
+      invoicePdf: (id) => { const s = saleById(id); if (s) downloadInvoice(s); },
+      openInvoice: (id) => { const s = saleById(id); if (s) saleModal(s); },
+    },
+  };
+}
+
+async function startAssistant() {
+  if (assistant || !state.user) return;
+  try {
+    const m = await import('./assistant.js');
+    if (!state.user || assistant) return;
+    assistant = m.initAssistant(aiContext());
+    aiMemory.sync().catch(() => {});
+  } catch (e) {
+    console.warn('AI assistant could not start', e);
+  }
 }
 
 /* ---------------------------------------------------------------------

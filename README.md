@@ -1,4 +1,4 @@
-# AKASH SHOP C1 · Inventory Tracker
+# AKASH SHOP C1 · AI-Powered Shop Management
 
 A password-protected inventory website for the shop. It runs as a static site from GitHub Pages, and Supabase handles the logins and stores the data.
 
@@ -43,6 +43,43 @@ A password-protected inventory website for the shop. It runs as a static site fr
 - **Invoice details** (Invoices tab) sets the shop address, phone, email and bottom message printed on invoices. **Frequent customers** lets you add or remove saved customers.
 
 
+### AI Shop Assistant
+
+Tap **AI Assistant** in the top bar or the glowing button at the bottom right. Inside the Live Sales Counter, it's the **AI Assistant** button in the counter's header.
+
+- **It talks and listens.** It opens with a greeting, asks what it can do, and then listens hands-free. It keeps waiting patiently until you speak and ignores chatter that isn't meant for it. Tap the microphone to pause listening, and tap the speaker to mute its voice; replies still show on screen.
+- **Three languages:** English (the default), Urdu and Hindi. Use the globe button to switch, or just say "speak Urdu". If the phone has no Urdu voice installed, it speaks with the Hindi voice, which sounds the same for everyday Urdu.
+- **It answers from live shop data.** Ask about:
+  - sales for today, any date or a range of dates
+  - the day's summary
+  - stock in the shop or the warehouse
+  - prices, what's low or out of stock, and best sellers
+  - who owes the most and who has owed the longest
+  - a customer's balance
+  - a customer's last invoice, with the items read out
+- **It makes changes, but always asks "Shall I go ahead?" first.** It can:
+  - record a customer's payment (split across their oldest invoices first)
+  - record a delivery or damaged stock
+  - move stock between the shop and the warehouse
+  - correct a stock count
+  - flag an item as out of stock
+  - download the sales report or the inventory PDF
+- **It runs the Live Sales Counter by voice.** For example:
+  - "start a sale"
+  - "2 Samsung chargers and a case at 5 pounds"
+  - "make the case 4.50"
+  - "remove the charger"
+  - "read it back"
+  - "that's all"
+  - "Ali Raza"
+  - "paid 20 cash, rest on credit"
+  - "yes"
+  
+  The sale is then recorded and the invoice downloads.
+- **When it isn't sure, it asks.** It might say "Which one: iPhone charger or Samsung charger?" or "Did you mean …?". It understands many ways of saying things, follow-ups such as "and in the warehouse?" or "what about yesterday?", and side questions in the middle of a sale.
+- **It learns as you use it.** New items and customers are understood as soon as they're added. When you pick an item from its list, it remembers what you called it. You can also teach it your own words: "when I say black charger, I mean Samsung 25W Fast Charger". To share what it learns across all your devices, run `supabase/assistant.sql` once. This is optional.
+- **Voice works in** Chrome, Edge and Safari (phone or computer). Firefox can still be used by typing. The understanding is built into the app with no AI subscription, but the browser's own speech service turns your voice into text, which in Chrome is Google's service.
+
 ### Backup, export and Sales Tracker
 
 - **Backup** (top bar) → **Create backup** downloads one `.json` file containing everything: brand tabs, items, stock history, invoices, payments, frequent customers and invoice details. Keep these files somewhere safe (Google Drive, email to yourself, a USB stick).
@@ -60,9 +97,11 @@ js/config.js          ← your settings (Supabase keys, currency)
 js/app.js             the app
 js/pdf.js             builds the PDF invoices
 js/reports.js         builds the inventory and sales report PDFs
+js/assistant*.js      the AI Shop Assistant (panel, brain, languages, understanding)
 supabase/schema.sql   database setup, run once in Supabase
 supabase/sales.sql    sales/invoices setup, run once in Supabase
 supabase/backup.sql   backup/restore setup, run once in Supabase
+supabase/assistant.sql  optional: shares what the assistant learns across devices
 ```
 
 ## Setup (about 20 minutes)
